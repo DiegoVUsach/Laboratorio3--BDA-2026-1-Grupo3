@@ -1,0 +1,70 @@
+services:
+
+  # Nodo 1 de MongoDB (Primario)
+  mongo1:
+    image: mongo:6.0
+    container_name: mongo1
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo1-data:/data/db
+    healthcheck:
+      test: mongosh --eval "db.adminCommand('ping')" --quiet
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Nodo 2 de MongoDB (Secundario)
+  mongo2:
+    image: mongo:6.0
+    container_name: mongo2
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo2-data:/data/db
+
+  # Inicializador del Replica Set y Schemas
+  mongo-init:
+    image: mongo:6.0
+    container_name: mongo-init
+    depends_on:
+      mongo1:
+        condition: service_healthy
+    volumes:
+      - ./mongo-init:/mongo-init
+    entrypoint: [ "mongosh", "--host", "mongo1:27017", "-f", "/mongo-init/init.js" ]
+
+  # Contenedor de la aplicacion Spring Boot
+  app:
+    build: ./backend
+    container_name: lab1-app
+    ports:
+      - "8443:8443"
+    environment:
+      SPRING_DATA_MONGODB_URI: mongodb://mongo1:27017,mongo2:27017/laboratorio1?replicaSet=rs0&authSource=admin
+      APP_JWT_SECRET: ${JWT_SECRET}
+      SERVER_PORT: 8443
+      SERVER_SSL_KEY_STORE: classpath:keystore.p12
+      SERVER_SSL_KEY_STORE_PASSWORD: ${SSL_PASSWORD}
+      SERVER_SSL_KEY_STORE_TYPE: PKCS12
+      SERVER_SSL_KEY_ALIAS: springboot
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+    restart: on-failure
+
+  # Contenedor del frontend (Vue + Nginx)
+  frontend:
+    build: ./frontend
+    container_name: lab1-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - app
+    restart: always
+
+volumes:
+  mongo1-data:
+  mongo2-data:
