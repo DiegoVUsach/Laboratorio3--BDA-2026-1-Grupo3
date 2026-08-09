@@ -131,10 +131,27 @@ public class InventarioRepository {
             inv.setItems(items);
 
             p.setInventario(inv);
+            p.setItemLevel(calcularItemLevel(inv));
             mongoTemplate.save(p);
             return 1;
         }
         return 0;
+    }
+
+    private int calcularItemLevel(Personaje.Inventario inventario) {
+        int itemLevel = 0;
+        itemLevel += nivelItem(inventario.getArmaduraEquipado());
+        itemLevel += nivelItem(inventario.getArmaEquipado());
+        itemLevel += nivelItem(inventario.getAccesorioEquipado());
+        return itemLevel;
+    }
+
+    private int nivelItem(Integer idItem) {
+        if (idItem == null) {
+            return 0;
+        }
+        Item item = mongoTemplate.findById(idItem, Item.class);
+        return item != null && item.getNivel() != null ? item.getNivel() : 0;
     }
 
     private void agregarDesequipado(List<Integer> items, Integer anterior, Integer actual) {

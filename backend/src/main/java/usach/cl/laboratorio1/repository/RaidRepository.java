@@ -1,5 +1,10 @@
 package usach.cl.laboratorio1.repository;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -7,11 +12,10 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
+
+import usach.cl.laboratorio1.service.SequenceGeneratorService;
 import usach.cl.laboratorio1.tablas.Personaje;
 import usach.cl.laboratorio1.tablas.Raid;
-import usach.cl.laboratorio1.service.SequenceGeneratorService;
-
-import java.util.*;
 
 @Repository
 public class RaidRepository {
@@ -117,7 +121,7 @@ public class RaidRepository {
         return 0;
     }
 
-    // Finalizar raid: marca BOSS_MUERTO para que el Change Stream reactive dispare el Loot y complete
+    // Finalizar raid: los participantes confirmados reciben botin desde el controlador.
     public void finalizarRaid(Integer idRaid) {
         Raid raid = mongoTemplate.findById(idRaid, Raid.class);
         if (raid == null) {
@@ -127,8 +131,7 @@ public class RaidRepository {
             throw new RuntimeException("La raid " + idRaid + " ya estaba finalizada.");
         }
 
-        // Fijar estado intermedio BOSS_MUERTO para activar el Change Stream
-        raid.setEstado("BOSS_MUERTO");
+        raid.setEstado("COMPLETADA");
         mongoTemplate.save(raid);
     }
 }

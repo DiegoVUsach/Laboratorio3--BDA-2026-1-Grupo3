@@ -15,6 +15,8 @@ const emit = defineEmits<{ (e: 'refrescar'): void }>();
 
 const raids = ref<RaidDTO[]>([]);
 const misInscripciones = ref<any[]>([]);
+const rolesRaid = ['TANQUE', 'HEALER', 'DPS'];
+const invitados = ref<any[]>([]);
 
 const loading = ref(true);
 const error = ref('');
@@ -100,12 +102,7 @@ const rolEnRaid = ref('');
 async function abrirInscribirse(rd: RaidDTO) {
   raidInscripcion.value = rd;
   rolEnRaid.value = ''; modalError.value = '';
-  bossInscripcion.value = null;
   showInscribirse.value = true;
-  try {
-    const b = await geoService.boss(rd.raid.idRaid);
-    if (b && b.geometry) bossInscripcion.value = { x: b.geometry.coordinates[0], y: b.geometry.coordinates[1] };
-  } catch { /* la raid puede no tener jefe */ }
 }
 
 async function inscribirse() {
@@ -114,9 +111,6 @@ async function inscribirse() {
   try {
     const idRaid = raidInscripcion.value.raid.idRaid;
     await raidService.inscribirse(idRaid, props.character.idPersonaje, rolEnRaid.value);
-    if (miPosicion.value) {
-      try { await geoService.setPosicionEnRaid(idRaid, props.character.idPersonaje, miPosicion.value.x, miPosicion.value.y); } catch { /* opcional */ }
-    }
     success.value = 'Inscripcion enviada';
     showInscribirse.value = false;
     await cargarTodo();
@@ -148,19 +142,24 @@ async function confirmarDesdeLista(idRaid: number) {
 // ---------- Detalle del encuentro ----------
 const showDetalle = ref(false);
 const raidDetalle = ref<RaidDTO | null>(null);
+const detalleError = ref('');
+const tanqueLider = computed(() => invitados.value.find(i => i.rol_en_raid === 'TANQUE') || null);
 async function verDetalle(rd: RaidDTO) {
   raidDetalle.value = rd;
   detalleError.value = '';
   invitados.value = [];
   showDetalle.value = true;
-  try { invitados.value = await inscripcionService.getByRaid(rd.raid.idRaid); } catch { /* vacio */ }
+  try {
+    invitados.value = await inscripcionService.getByRaid(rd.raid.idRaid);
+  } catch (e: any) {
+    detalleError.value = e.message || 'No se pudo cargar el detalle de la raid.';
+  }
 }
 
 
 // ---------- Finalizar ----------
 const showFinalizar = ref(false);
 const raidAFinalizar = ref<RaidDTO | null>(null);
-const excluidos = ref<any[]>([]);
 const finalizarError = ref('');
 
 async function abrirFinalizar(rd: RaidDTO) {
@@ -362,24 +361,8 @@ function estadoClass(estado: string) {
     <div v-if="showFinalizar" class="modal-overlay" @click.self="showFinalizar = false">
       <div class="modal modal-lg">
         <h3>Finalizar: {{ raidAFinalizar?.raid.nombreRaid }}</h3>
-        <p class="hint-mini">Cada asistente dentro de 50 metros del jefe recibe un item al azar en su pool de canje. Los que quedan fuera no reciben botin.</p>
+        <p class="hint-mini">Todos los participantes confirmados recibiran un item al azar en su pool de canje.</p>
         <div v-if="finalizarError" class="alert alert-error">{{ finalizarError }}</div>
-        <div class="prox-cols">
-          <div>
-            <h4 class="prox-ok">Reciben botin ({{ elegibles.length }})</h4>
-            <ul class="prox-list">
-              <li v-for="e in elegibles" :key="e.id_personaje">{{ e.nombre_personaje }} <span class="prox-dist">a {{ e.distancia }} m</span></li>
-              <li v-if="elegibles.length === 0" class="prox-empty">Sin posiciones registradas: se repartira a todos los confirmados.</li>
-            </ul>
-          </div>
-          <div>
-            <h4 class="prox-no">Quedan fuera ({{ excluidos.length }})</h4>
-            <ul class="prox-list">
-              <li v-for="x in excluidos" :key="x.id_personaje">{{ x.nombre_personaje }} <span class="prox-dist">a {{ x.distancia }} m</span></li>
-              <li v-if="excluidos.length === 0" class="prox-empty">Nadie fuera de rango.</li>
-            </ul>
-          </div>
-        </div>
         <div class="modal-actions">
           <button class="btn-cancel" @click="showFinalizar = false">Cancelar</button>
           <button class="btn-primary" @click="confirmarFinalizar">Finalizar y repartir</button>
