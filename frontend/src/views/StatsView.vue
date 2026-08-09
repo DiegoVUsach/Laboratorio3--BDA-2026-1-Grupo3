@@ -88,9 +88,8 @@ async function refrescar() {
     <div v-if="vista === 'clanes'" class="panel">
       <div class="panel-head"><h3>Clanes mejor rankeados</h3></div>
       <p class="panel-note">
-        Aggregation Pipeline ($match, $unwind, $group, $lookup, $sort) materializado con
-        $merge en la coleccion <code>clanes_rankeados</code>. El puntaje combina el dano
-        por minuto con la asistencia acumulada.
+        Ranking basado en el desempeno de cada clan. El puntaje combina el dano por minuto
+        con la asistencia acumulada en sus raids.
       </p>
       <div v-if="loading" class="loader">Cargando ranking...</div>
       <div v-else class="table-wrap">
