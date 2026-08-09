@@ -42,8 +42,7 @@ export interface HistorialBotin {
 }
 export interface RankingEntry {
   id_personaje: number; nombre_personaje: string; nombre_clan: string; faccion: string;
-  raids_invitado: number; raids_asistidas: number; ausencias: number;
-  asistencia_perfecta: boolean; contribucion_dkp: number;
+  raids_asistidas: number; contribucion_dkp: number; item_level: number;
 }
 export interface Notificacion {
   id_notificacion: number; tipo: string; mensaje: string; leida: boolean; fecha: string;
@@ -182,7 +181,7 @@ export const inscripcionService = {
 
 export const notificacionService = {
   mias(idPersonaje: number) { return apiRequest<Notificacion[]>(`/notificaciones/mias?idPersonaje=${idPersonaje}`); },
-  noLeidas(idPersonaje: number) { return apiRequest<{count:number}>(`/notificaciones/no-leidas?idPersonaje=${idPersonaje}`); },
+  noLeidas(idPersonaje: number) { return apiRequest<{ count: number }>(`/notificaciones/no-leidas?idPersonaje=${idPersonaje}`); },
   marcarLeida(id: number) { return apiRequest<string>(`/notificaciones/${id}/leida`, 'PUT'); },
   marcarTodas(idPersonaje: number) {
     return apiRequest<string>(`/notificaciones/marcar-todas?idPersonaje=${idPersonaje}`, 'PUT');

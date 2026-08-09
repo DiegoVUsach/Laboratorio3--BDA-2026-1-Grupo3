@@ -1,18 +1,19 @@
 package usach.cl.laboratorio1.repository;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
+
 import usach.cl.laboratorio1.dto.InventarioDTO;
 import usach.cl.laboratorio1.dto.InventarioItemDTO;
 import usach.cl.laboratorio1.tablas.Inventario;
 import usach.cl.laboratorio1.tablas.Item;
 import usach.cl.laboratorio1.tablas.Personaje;
-
-import java.util.ArrayList;
-import java.util.List;
 
 @Repository
 public class InventarioRepository {
@@ -111,16 +112,35 @@ public class InventarioRepository {
     public int save(Inventario e) {
         Personaje p = mongoTemplate.findById(e.getIdPersonaje(), Personaje.class);
         if (p != null) {
+            Personaje.Inventario anterior = p.getInventario();
             Personaje.Inventario inv = new Personaje.Inventario();
             inv.setIdInventario(e.getIdInventario() != null ? e.getIdInventario() : p.getIdPersonaje());
             inv.setArmaduraEquipado(e.getArmaduraEquipado());
             inv.setArmaEquipado(e.getArmaEquipado());
             inv.setAccesorioEquipado(e.getAccesorioEquipado());
+
+            List<Integer> items = anterior != null && anterior.getItems() != null
+                    ? new ArrayList<>(anterior.getItems())
+                    : new ArrayList<>();
+            agregarDesequipado(items, anterior != null ? anterior.getArmaduraEquipado() : null,
+                    inv.getArmaduraEquipado());
+            agregarDesequipado(items, anterior != null ? anterior.getArmaEquipado() : null,
+                    inv.getArmaEquipado());
+            agregarDesequipado(items, anterior != null ? anterior.getAccesorioEquipado() : null,
+                    inv.getAccesorioEquipado());
+            inv.setItems(items);
+
             p.setInventario(inv);
             mongoTemplate.save(p);
             return 1;
         }
         return 0;
+    }
+
+    private void agregarDesequipado(List<Integer> items, Integer anterior, Integer actual) {
+        if (anterior != null && !anterior.equals(actual) && !items.contains(anterior)) {
+            items.add(anterior);
+        }
     }
 
     public int update(Inventario e) {

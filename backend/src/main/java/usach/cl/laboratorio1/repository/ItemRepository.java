@@ -1,5 +1,14 @@
 package usach.cl.laboratorio1.repository;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -8,11 +17,14 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.PlatformTransactionManager;
-import usach.cl.laboratorio1.tablas.*;
-import usach.cl.laboratorio1.service.SequenceGeneratorService;
 
-import java.time.LocalDateTime;
-import java.util.*;
+import usach.cl.laboratorio1.service.SequenceGeneratorService;
+import usach.cl.laboratorio1.tablas.HistorialBotin;
+import usach.cl.laboratorio1.tablas.Item;
+import usach.cl.laboratorio1.tablas.LootPool;
+import usach.cl.laboratorio1.tablas.Notificacion;
+import usach.cl.laboratorio1.tablas.Personaje;
+import usach.cl.laboratorio1.tablas.Raid;
 
 @Repository
 public class ItemRepository {
@@ -28,7 +40,6 @@ public class ItemRepository {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
-
 
     public List<Item> findAll(int page, int size) {
         Query query = new Query().with(PageRequest.of(page, size, Sort.by("idItem").ascending()));
@@ -177,8 +188,8 @@ public class ItemRepository {
         }
 
         // Ejecutar dentro de una transaccion con sesion explicita
-        org.springframework.transaction.support.TransactionTemplate txTemplate =
-                new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        org.springframework.transaction.support.TransactionTemplate txTemplate
+                = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
 
         txTemplate.execute(status -> {
             Random rand = new Random();
@@ -187,13 +198,19 @@ public class ItemRepository {
             for (Raid.InscripcionRaid ins : raid.getInscripciones()) {
                 // Filtrar: solo confirmados
                 boolean confirmado = ins.getConfirmado() != null && ins.getConfirmado();
-                if (!confirmado) continue;
+                if (!confirmado) {
+                    continue;
+                }
 
                 Personaje personaje = mongoTemplate.findById(ins.getIdPersonaje(), Personaje.class);
-                if (personaje == null) continue;
+                if (personaje == null) {
+                    continue;
+                }
 
                 // Filtrar: no distribuir a caidos
-                if (personaje.getCaido() != null && personaje.getCaido()) continue;
+                if (personaje.getCaido() != null && personaje.getCaido()) {
+                    continue;
+                }
 
                 // Elegir un item aleatorio que no haya sido asignado en esta raid
                 Item randomItem = null;
@@ -208,8 +225,9 @@ public class ItemRepository {
                     }
                     intentos++;
                 }
-                if (randomItem == null) continue; // No quedan items disponibles
-
+                if (randomItem == null) {
+                    continue; // No quedan items disponibles
+                }
                 LootPool lp = new LootPool();
                 lp.setIdPool(sequenceGeneratorService.generateSequence("lootPoolId"));
                 lp.setIdPersonaje(personaje.getIdPersonaje());
@@ -270,7 +288,7 @@ public class ItemRepository {
         pipeline.add(new org.bson.Document("$lookup",
                 new org.bson.Document("from", "personajes")
                         .append("localField", "inscripciones.idPersonaje")
-                        .append("foreignField", "idPersonaje")
+                        .append("foreignField", "_id")
                         .append("as", "personaje_info")));
 
         // 5. Unwind personaje_info
@@ -280,7 +298,7 @@ public class ItemRepository {
         pipeline.add(new org.bson.Document("$lookup",
                 new org.bson.Document("from", "clanes")
                         .append("localField", "idClan")
-                        .append("foreignField", "idClan")
+                        .append("foreignField", "_id")
                         .append("as", "clan_info")));
 
         // 7. Unwind clan_info
@@ -352,6 +370,10 @@ public class ItemRepository {
         Query query = new Query(Criteria.where("tipo").ne("bucket"))
                 .with(Sort.by(Sort.Direction.DESC, "raids_asistidas"));
         List<Map> list = mongoTemplate.find(query, Map.class, "clan_rankings");
+        if (list.isEmpty()) {
+            refrescarRanking();
+            list = mongoTemplate.find(query, Map.class, "clan_rankings");
+        }
         List<Map<String, Object>> res = new ArrayList<>();
         for (Map m : list) {
             Map<String, Object> map = new HashMap<>();
@@ -367,4 +389,3 @@ public class ItemRepository {
         return res;
     }
 }
-
