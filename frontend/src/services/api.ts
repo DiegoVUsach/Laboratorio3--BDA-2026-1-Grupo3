@@ -53,7 +53,10 @@ export interface Notificacion {
 async function apiRequest<T>(endpoint: string, method: string = 'GET', body?: any): Promise<T> {
   const token = localStorage.getItem('auth_token');
   const headers: HeadersInit = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  // No enviar el token JWT en los endpoints de autenticacion,
+  // un token viejo/invalido guardado causaria un 403 en el login.
+  const isAuthEndpoint = endpoint.startsWith('/auth/');
+  if (token && !isAuthEndpoint) headers['Authorization'] = `Bearer ${token}`;
   const response = await fetch(`${API_URL}${endpoint}`, {
     method, headers, body: body ? JSON.stringify(body) : undefined,
   });

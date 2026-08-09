@@ -95,8 +95,16 @@ public class PersonajeRepository {
     }
 
     public boolean esLiderDeClan(Integer idPersonaje, Integer idClan) {
-        Query query = new Query(Criteria.where("idClan").is(idClan).and("idLider").is(idPersonaje));
-        return mongoTemplate.exists(query, usach.cl.laboratorio1.tablas.Clanes.class);
+
+        Query query = new Query(
+                Criteria.where("_id").is(idClan)
+                        .and("idLider").is(idPersonaje)
+        );
+
+        return mongoTemplate.exists(
+                query,
+                usach.cl.laboratorio1.tablas.Clanes.class
+        );
     }
 
     public boolean perteneceAUsuario(Integer idPersonaje, String username) {

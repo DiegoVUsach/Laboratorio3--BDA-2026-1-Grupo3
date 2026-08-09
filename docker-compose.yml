@@ -49,6 +49,7 @@ services:
       SERVER_SSL_KEY_STORE_PASSWORD: ${SSL_PASSWORD}
       SERVER_SSL_KEY_STORE_TYPE: PKCS12
       SERVER_SSL_KEY_ALIAS: springboot
+      SPRING_MONGODB_URI: mongodb://mongo1:27017,mongo2:27017/laboratorio1?replicaSet=rs0
     depends_on:
       mongo-init:
         condition: service_completed_successfully

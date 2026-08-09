@@ -1,11 +1,13 @@
 package usach.cl.laboratorio1.config;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import io.jsonwebtoken.Claims;
@@ -29,54 +31,81 @@ public class JwtFilter extends OncePerRequestFilter {
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain)
+    protected void doFilterInternal(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            FilterChain filterChain)
             throws ServletException, IOException {
 
-        // 1. Buscar el header "Authorization" en la peticion
         String authHeader = request.getHeader("Authorization");
 
-        // 2. Si existe y empieza con "Bearer ", extraer el token
+        System.out.println("====================================");
+        System.out.println("JWT FILTER");
+        System.out.println("URL: " + request.getRequestURI());
+        System.out.println("AUTH HEADER: " + authHeader);
+
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String token = authHeader.substring(7); // quitar "Bearer "
+
+            String token = authHeader.substring(7);
+
             try {
-                // 3. Decodificar el token usando la misma clave secreta
-                //    con la que se firmo en JwtService.
-                //    Si alguien modifico el token, la firma no coincide
-                //    y lanza excepcion (cae al catch).
+
                 Claims claims = Jwts.parserBuilder()
-                        .setSigningKey(Keys.hmacShaKeyFor(secretKey.getBytes()))
+                        .setSigningKey(
+                                Keys.hmacShaKeyFor(
+                                        secretKey.getBytes(StandardCharsets.UTF_8)
+                                )
+                        )
                         .build()
                         .parseClaimsJws(token)
                         .getBody();
 
-                // 4. Extraer username y rol del token
                 String username = claims.getSubject();
                 String rol = claims.get("rol", String.class);
 
-                if (username != null) {
-                    // 5. Crear la "autenticacion" de Spring Security.
-                    //    Le decimos a Spring: "este usuario esta autenticado
-                    //    y tiene el rol ROLE_USER o ROLE_ADMIN".
-                    //    Esto permite usar @PreAuthorize en los controllers.
-                    List<SimpleGrantedAuthority> authorities = List.of(
-                            new SimpleGrantedAuthority("ROLE_" + (rol != null ? rol : "USER"))
-                    );
-                    UsernamePasswordAuthenticationToken auth =
-                            new UsernamePasswordAuthenticationToken(
-                                    username, null, authorities);
-                    SecurityContextHolder.getContext().setAuthentication(auth);
-                }
+                System.out.println("JWT VALIDO");
+                System.out.println("USERNAME: " + username);
+                System.out.println("ROL: " + rol);
+
+                List<SimpleGrantedAuthority> authorities = List.of(
+                        new SimpleGrantedAuthority(
+                                "ROLE_" + (rol != null ? rol : "USER")
+                        )
+                );
+
+                UsernamePasswordAuthenticationToken auth
+                        = new UsernamePasswordAuthenticationToken(
+                                username,
+                                null,
+                                authorities
+                        );
+
+                auth.setDetails(
+                        new WebAuthenticationDetailsSource()
+                                .buildDetails(request)
+                );
+
+                SecurityContextHolder
+                        .getContext()
+                        .setAuthentication(auth);
+
+                System.out.println(
+                        "AUTHENTICATION ESTABLECIDA: "
+                        + SecurityContextHolder
+                                .getContext()
+                                .getAuthentication()
+                );
+
             } catch (Exception e) {
-                // Token invalido, expirado o manipulado: limpiar contexto.
-                // La peticion seguira pero sin autenticacion,
-                // asi que Spring Security la rechazara con 401.
+
+                System.out.println("========== ERROR JWT ==========");
+                System.out.println(e.getClass().getName());
+                System.out.println(e.getMessage());
+
                 SecurityContextHolder.clearContext();
             }
         }
 
-        // 6. Pasar la peticion al siguiente filtro (o al controller).
         filterChain.doFilter(request, response);
     }
 }

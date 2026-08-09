@@ -68,7 +68,7 @@ public class ClanesRepository {
         clan.setIdClan(sequenceGeneratorService.generateSequence("clanId"));
         clan.setNombreClan(nombreClan);
         clan.setIdLider(idPersonaje);
-        clan.setFaccion(p.getFaccion().getLabel());
+        clan.setFaccion(p.getFaccion().name());
         clan.setAuditoriaLiderazgo(new ArrayList<>());
         mongoTemplate.save(clan);
 
@@ -93,7 +93,7 @@ public class ClanesRepository {
         }
 
         // Validar faccion
-        if (clan.getFaccion() != null && !clan.getFaccion().equals(p.getFaccion().getLabel())) {
+        if (clan.getFaccion() != null && !clan.getFaccion().equals(p.getFaccion().name())) {
             throw new RuntimeException("Un personaje solo entra a clanes de su faccion.");
         }
 
