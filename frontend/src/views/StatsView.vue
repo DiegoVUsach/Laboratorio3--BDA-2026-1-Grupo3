@@ -10,6 +10,8 @@ import { itemService, clanService, type RankingEntry } from '../services/api';
 const props = defineProps<{ character: any; token: string }>();
 
 const ranking = ref<RankingEntry[]>([]);
+const rankingClanes = ref<any[]>([]);
+const vista = ref<'clanes' | 'jugadores'>('clanes');
 const loading = ref(true);
 const error = ref('');
 const success = ref('');
@@ -25,7 +27,9 @@ onMounted(async () => {
 
 async function cargarRanking() {
   loading.value = true; error.value = '';
-  try { ranking.value = await itemService.getRanking(); }
+  try { rankingClanes.value = await itemService.getRanking(); }
+  catch (e: any) { error.value = e.message; }
+  try { ranking.value = await itemService.rankingJugadores(); }
   catch (e: any) { error.value = e.message; }
   finally { loading.value = false; }
 }
@@ -61,7 +65,63 @@ async function refrescar() {
     <div v-if="error" class="alert alert-error" @click="error = ''">{{ error }}</div>
     <div v-if="success" class="alert alert-success" @click="success = ''">{{ success }}</div>
 
-    <div class="panel">
+    <!-- Podio de clanes (Tarea 4) -->
+    <div v-if="rankingClanes.length > 0" class="podio">
+      <div v-for="(c, i) in rankingClanes.slice(0, 3)" :key="c.id_clan"
+           class="podio-card" :class="['pos-' + (i + 1), { mine: c.nombre_clan === miClanNombre }]">
+        <span class="podio-pos">{{ i + 1 }}</span>
+        <h3>{{ c.nombre_clan }}</h3>
+        <p class="podio-puntaje">{{ (c.puntaje || 0).toLocaleString('es-CL') }} pts</p>
+        <p class="podio-detalle">
+          {{ (c.dano_total || 0).toLocaleString('es-CL') }} de dano ·
+          {{ c.asistencia_total }} asistencias · {{ c.tiempo_promedio }} min prom.
+        </p>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button :class="{ active: vista === 'clanes' }" @click="vista = 'clanes'">Clanes</button>
+      <button :class="{ active: vista === 'jugadores' }" @click="vista = 'jugadores'">Jugadores</button>
+    </div>
+
+    <!-- Ranking de CLANES: materializada clanes_rankeados -->
+    <div v-if="vista === 'clanes'" class="panel">
+      <div class="panel-head"><h3>Clanes mejor rankeados</h3></div>
+      <p class="panel-note">
+        Aggregation Pipeline ($match, $unwind, $group, $lookup, $sort) materializado con
+        $merge en la coleccion <code>clanes_rankeados</code>. El puntaje combina el dano
+        por minuto con la asistencia acumulada.
+      </p>
+      <div v-if="loading" class="loader">Cargando ranking...</div>
+      <div v-else class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>#</th><th>Clan</th><th>Raids</th><th>Asistencia</th>
+                <th>Dano total</th><th>Tiempo prom.</th><th>Dano/min</th><th>Puntaje</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(c, i) in rankingClanes" :key="c.id_clan"
+                :class="{ 'top-row': i < 3, mine: c.nombre_clan === miClanNombre }">
+              <td>{{ i + 1 }}</td>
+              <td class="player-name">{{ c.nombre_clan }}</td>
+              <td>{{ c.raids_completadas }}</td>
+              <td>{{ c.asistencia_total }}</td>
+              <td>{{ (c.dano_total || 0).toLocaleString('es-CL') }}</td>
+              <td>{{ c.tiempo_promedio }} min</td>
+              <td>{{ (c.dano_por_minuto || 0).toLocaleString('es-CL') }}</td>
+              <td class="dkp-val">{{ (c.puntaje || 0).toLocaleString('es-CL') }}</td>
+            </tr>
+            <tr v-if="rankingClanes.length === 0">
+              <td colspan="8" class="empty-cell">
+                Sin datos. Finaliza una raid registrando duracion y dano para alimentar el ranking.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div v-else class="panel">
       <div class="panel-head">
         <h3>Ranking de Jugadores</h3>
         <div class="filtros">
@@ -113,6 +173,20 @@ async function refrescar() {
 .mine { box-shadow: inset 3px 0 0 var(--gold); }
 .player-name { font-weight: 600; }
 .dkp-val { color: var(--gold); font-weight: 700; }
+.podio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 4px; }
+.podio-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; position: relative; }
+.podio-card.pos-1 { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
+.podio-card.mine { background: rgba(169,121,31,0.06); }
+.podio-pos { position: absolute; top: 12px; right: 14px; font-size: 26px; font-weight: 800; color: var(--border); }
+.podio-card h3 { margin: 0 0 6px; font-size: 16px; }
+.podio-puntaje { color: var(--gold); font-weight: 700; font-size: 20px; margin: 0 0 4px; }
+.podio-detalle { font-size: 12px; color: var(--text-dim); margin: 0; }
+.tabs { display: flex; gap: 8px; }
+.tabs button { background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 7px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; }
+.tabs button.active { background: var(--gold); color: #fff; border-color: var(--gold); }
+.panel-note { font-size: 12px; color: var(--text-dim); margin: 6px 0 12px; }
+.panel-note code { background: rgba(0,0,0,0.05); padding: 1px 5px; border-radius: 4px; }
+@media (max-width: 900px) { .podio { grid-template-columns: 1fr; } }
 .empty-cell { text-align: center; color: var(--text-dim); padding: 20px; }
 .loader { text-align: center; color: var(--text-dim); padding: 20px; }
 </style>

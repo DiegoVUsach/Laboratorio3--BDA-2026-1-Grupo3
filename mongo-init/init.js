@@ -92,9 +92,9 @@ db.createCollection("personajes", {
                 clase: { bsonType: "string" },
                 faccion: { bsonType: "string" },
                 rolClan: { bsonType: "string" },
-                nivel: { bsonType: "int", minimum: 1 },
-                itemLevel: { bsonType: "int", minimum: 0 },
-                puntosDkpActuales: { bsonType: "int" },
+                nivel: { bsonType: "int", minimum: 1, maximum: 60 },
+                itemLevel: { bsonType: "int", minimum: 0, maximum: 1000 },
+                puntosDkpActuales: { bsonType: "int", minimum: 0 },
                 caido: { bsonType: "bool" },
                 inventario: {
                     bsonType: "object",
@@ -124,7 +124,7 @@ db.createCollection("items", {
                 rareza: { bsonType: "string" },
                 tipo: { bsonType: "string", enum: ["ARMADURA", "ARMA", "ACCESORIO"] },
                 nivel: { bsonType: "int" },
-                costoDkp: { bsonType: "int" }
+                costoDkp: { bsonType: "int", minimum: 0 }
             }
         }
     }
@@ -141,10 +141,10 @@ db.createCollection("raids", {
                 idClan: { bsonType: "int" },
                 nombreRaid: { bsonType: "string" },
                 fechaRaid: { bsonType: "date" },
-                itemLevelMinimo: { bsonType: "int" },
-                tanques: { bsonType: "int" },
-                healers: { bsonType: "int" },
-                dps: { bsonType: "int" },
+                itemLevelMinimo: { bsonType: "int", minimum: 0, maximum: 1000 },
+                tanques: { bsonType: "int", minimum: 0, maximum: 40 },
+                healers: { bsonType: "int", minimum: 0, maximum: 40 },
+                dps: { bsonType: "int", minimum: 0, maximum: 40 },
                 estado: { bsonType: "string", enum: ["PROGRAMADA", "BOSS_MUERTO", "COMPLETADA"] },
                 inscripciones: {
                     bsonType: "array",
@@ -155,7 +155,11 @@ db.createCollection("raids", {
                             idInscripcion: { bsonType: "int" },
                             idPersonaje: { bsonType: "int" },
                             rolEnRaid: { bsonType: "string" },
-                            confirmado: { bsonType: "bool" }
+                            confirmado: { bsonType: "bool" },
+                        dano: {
+                            bsonType: ["int", "null"], minimum: 0,
+                            description: "Dano aportado por el personaje en la raid"
+                        }
                         }
                     }
                 }
@@ -222,7 +226,8 @@ db.createCollection("notificaciones", {
 });
 
 db.createCollection("database_sequences");
-db.createCollection("clan_rankings");
+db.createCollection("clan_rankings");        // ranking de jugadores ($merge)
+db.createCollection("clanes_rankeados");    // clanes mejor rankeados ($merge, Tarea 6)
 
 // ============================================================
 // INDICES
@@ -237,6 +242,12 @@ db.loot_pool.createIndex({ fecha: 1 }, { expireAfterSeconds: 2592000 });
 db.raids.createIndex({ idClan: 1, estado: 1 });
 db.loot_pool.createIndex({ idPersonaje: 1, canjeado: 1 });
 db.loot_pool.createIndex({ idRaid: 1, idItem: 1 }, { unique: true });
+
+// Indice de TEXTO para el buscador del catalogo de items (requisito de indices)
+db.items.createIndex({ nombreItem: "text" });
+
+// Historial por personaje, ordenado por fecha
+db.historial_botin.createIndex({ idPersonaje: 1, fechaEntrega: -1 });
 print("Indices creados.");
 
 // ============================================================
@@ -419,14 +430,14 @@ db.raids.insertMany([
     // Raid 3: Clan 1, COMPLETADA (se completa)
     {
         _id: 3, idClan: 1, nombreRaid: "Asalto a la Ciudadela", fechaRaid: hace1Semana,
-        itemLevelMinimo: 500, tanques: 2, healers: 3, dps: 6, estado: "COMPLETADA",
+        itemLevelMinimo: 500, tanques: 2, healers: 3, dps: 6, estado: "COMPLETADA", duracionMinutos: 42,
         inscripciones: [
-            { idInscripcion: 13, idPersonaje: 1, rolEnRaid: "TANQUE", confirmado: true },
-            { idInscripcion: 14, idPersonaje: 5, rolEnRaid: "TANQUE", confirmado: true },
-            { idInscripcion: 15, idPersonaje: 2, rolEnRaid: "HEALER", confirmado: true },
-            { idInscripcion: 16, idPersonaje: 8, rolEnRaid: "HEALER", confirmado: true },
-            { idInscripcion: 17, idPersonaje: 3, rolEnRaid: "DPS", confirmado: true },
-            { idInscripcion: 18, idPersonaje: 4, rolEnRaid: "DPS", confirmado: true },
+            { idInscripcion: 13, idPersonaje: 1, rolEnRaid: "TANQUE", confirmado: true, dano: 172000 },
+            { idInscripcion: 14, idPersonaje: 5, rolEnRaid: "TANQUE", confirmado: true, dano: 139000 },
+            { idInscripcion: 15, idPersonaje: 2, rolEnRaid: "HEALER", confirmado: true, dano: 128000 },
+            { idInscripcion: 16, idPersonaje: 8, rolEnRaid: "HEALER", confirmado: true, dano: 36000 },
+            { idInscripcion: 17, idPersonaje: 3, rolEnRaid: "DPS", confirmado: true, dano: 42000 },
+            { idInscripcion: 18, idPersonaje: 4, rolEnRaid: "DPS", confirmado: true, dano: 165000 },
             { idInscripcion: 19, idPersonaje: 12, rolEnRaid: "HEALER", confirmado: false }
         ]
     },
@@ -445,15 +456,15 @@ db.raids.insertMany([
     // Raid 5: Clan 2, COMPLETADA (se completa)
     {
         _id: 5, idClan: 2, nombreRaid: "Cripta de Ceniza", fechaRaid: hace2Semanas,
-        itemLevelMinimo: 500, tanques: 2, healers: 2, dps: 5, estado: "COMPLETADA",
+        itemLevelMinimo: 500, tanques: 2, healers: 2, dps: 5, estado: "COMPLETADA", duracionMinutos: 55,
         inscripciones: [
-            { idInscripcion: 25, idPersonaje: 15, rolEnRaid: "TANQUE", confirmado: true },
-            { idInscripcion: 26, idPersonaje: 22, rolEnRaid: "TANQUE", confirmado: true },
-            { idInscripcion: 27, idPersonaje: 16, rolEnRaid: "HEALER", confirmado: true },
+            { idInscripcion: 25, idPersonaje: 15, rolEnRaid: "TANQUE", confirmado: true, dano: 38000 },
+            { idInscripcion: 26, idPersonaje: 22, rolEnRaid: "TANQUE", confirmado: true, dano: 176000 },
+            { idInscripcion: 27, idPersonaje: 16, rolEnRaid: "HEALER", confirmado: true, dano: 169000 },
             { idInscripcion: 28, idPersonaje: 18, rolEnRaid: "HEALER", confirmado: false },
-            { idInscripcion: 29, idPersonaje: 17, rolEnRaid: "DPS", confirmado: true },
-            { idInscripcion: 30, idPersonaje: 21, rolEnRaid: "DPS", confirmado: true },
-            { idInscripcion: 31, idPersonaje: 14, rolEnRaid: "DPS", confirmado: true }
+            { idInscripcion: 29, idPersonaje: 17, rolEnRaid: "DPS", confirmado: true, dano: 155000 },
+            { idInscripcion: 30, idPersonaje: 21, rolEnRaid: "DPS", confirmado: true, dano: 143000 },
+            { idInscripcion: 31, idPersonaje: 14, rolEnRaid: "DPS", confirmado: true, dano: 39000 }
         ]
     },
     // Raid 6: Clan 3, PROGRAMADA
@@ -471,14 +482,14 @@ db.raids.insertMany([
     // Raid 7: Clan 3, COMPLETADA (se completa)
     {
         _id: 7, idClan: 3, nombreRaid: "Fauces del Abismo", fechaRaid: hace3Semanas,
-        itemLevelMinimo: 500, tanques: 2, healers: 2, dps: 5, estado: "COMPLETADA",
+        itemLevelMinimo: 500, tanques: 2, healers: 2, dps: 5, estado: "COMPLETADA", duracionMinutos: 37,
         inscripciones: [
-            { idInscripcion: 37, idPersonaje: 25, rolEnRaid: "TANQUE", confirmado: true },
-            { idInscripcion: 38, idPersonaje: 31, rolEnRaid: "TANQUE", confirmado: true },
-            { idInscripcion: 39, idPersonaje: 26, rolEnRaid: "HEALER", confirmado: true },
-            { idInscripcion: 40, idPersonaje: 30, rolEnRaid: "HEALER", confirmado: true },
-            { idInscripcion: 41, idPersonaje: 24, rolEnRaid: "DPS", confirmado: true },
-            { idInscripcion: 42, idPersonaje: 28, rolEnRaid: "DPS", confirmado: true },
+            { idInscripcion: 37, idPersonaje: 25, rolEnRaid: "TANQUE", confirmado: true, dano: 36000 },
+            { idInscripcion: 38, idPersonaje: 31, rolEnRaid: "TANQUE", confirmado: true, dano: 42000 },
+            { idInscripcion: 39, idPersonaje: 26, rolEnRaid: "HEALER", confirmado: true, dano: 165000 },
+            { idInscripcion: 40, idPersonaje: 30, rolEnRaid: "HEALER", confirmado: true, dano: 158000 },
+            { idInscripcion: 41, idPersonaje: 24, rolEnRaid: "DPS", confirmado: true, dano: 151000 },
+            { idInscripcion: 42, idPersonaje: 28, rolEnRaid: "DPS", confirmado: true, dano: 148000 },
             { idInscripcion: 43, idPersonaje: 32, rolEnRaid: "HEALER", confirmado: false },
             { idInscripcion: 44, idPersonaje: 27, rolEnRaid: "DPS", confirmado: false }
         ]

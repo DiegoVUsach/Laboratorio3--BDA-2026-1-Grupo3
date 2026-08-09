@@ -8,6 +8,7 @@ import usach.cl.laboratorio1.tablas.Item;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -32,12 +33,8 @@ public class ItemController {
         return itemRepository.findAll(page, size);
     }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<Item> findById(@PathVariable Integer id) {
-        Item item = itemRepository.findById(id);
-        return item != null ? ResponseEntity.ok(item) : ResponseEntity.notFound().build();
-    }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping
     public ResponseEntity<?> create(@RequestBody Item item) {
         try {
@@ -48,6 +45,7 @@ public class ItemController {
         }
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/{id}")
     public ResponseEntity<?> update(@PathVariable Integer id, @RequestBody Item item) {
         item.setIdItem(id);
@@ -56,6 +54,7 @@ public class ItemController {
     }
 
     // FIX BUG 3: Solo ADMIN puede eliminar items
+    @PreAuthorize("hasRole('ADMIN')")
     @DeleteMapping("/{id}")
     public ResponseEntity<?> delete(@PathVariable Integer id, Authentication auth) {
         if (!auth.getAuthorities().stream()
@@ -97,19 +96,33 @@ public class ItemController {
     }
 
     // Req 7: Ranking
+    /** Ranking de CLANES (Tarea 4): materializada clanes_rankeados. */
     @GetMapping("/ranking")
-    public List<Map<String, Object>> ranking() {
+    public List<Map<String, Object>> rankingClanes() {
+        return itemRepository.obtenerRankingClanes();
+    }
+
+    /** Ranking individual de jugadores (materializada clan_rankings). */
+    @GetMapping("/ranking-jugadores")
+    public List<Map<String, Object>> rankingJugadores() {
         return itemRepository.obtenerRanking();
     }
 
     @PostMapping("/ranking/refrescar")
     public ResponseEntity<?> refrescarRanking() {
         itemRepository.refrescarRanking();
+            itemRepository.refrescarRankingClanes();
         return ResponseEntity.ok("Ranking actualizado");
     }
 
     static class CanjeRequest {
         public Integer idPool;
         public Integer idPersonaje;
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<Item> findById(@PathVariable Integer id) {
+        Item item = itemRepository.findById(id);
+        return item != null ? ResponseEntity.ok(item) : ResponseEntity.notFound().build();
     }
 }

@@ -161,19 +161,41 @@ async function verDetalle(rd: RaidDTO) {
 const showFinalizar = ref(false);
 const raidAFinalizar = ref<RaidDTO | null>(null);
 const finalizarError = ref('');
+const duracionMinutos = ref<number | null>(45);
+// Metricas que informa el Guild Master: alimentan el ranking de clanes.
+const danosForm = ref<{ idPersonaje: number; nombre: string; rol: string; dano: number }[]>([]);
 
 async function abrirFinalizar(rd: RaidDTO) {
   raidAFinalizar.value = rd;
   finalizarError.value = '';
+  duracionMinutos.value = 45;
+  const inscritos = (rd.inscripciones || []).filter((i: any) => i.confirmado);
+  danosForm.value = inscritos.map((i: any) => ({
+    idPersonaje: i.idPersonaje,
+    nombre: i.nombrePersonaje || `Personaje ${i.idPersonaje}`,
+    rol: i.rolEnRaid || '',
+    dano: i.dano || 0,
+  }));
   showFinalizar.value = true;
 }
+
+const danoTotalForm = computed(() =>
+  danosForm.value.reduce((acc, d) => acc + (Number(d.dano) || 0), 0));
 
 async function confirmarFinalizar() {
   if (!raidAFinalizar.value) return;
   finalizarError.value = '';
   try {
-    await raidService.finalizar(raidAFinalizar.value.raid.idRaid);
-    success.value = 'Raid finalizada. El botin se repartio a los asistentes en rango del jefe.';
+    if (!duracionMinutos.value || duracionMinutos.value <= 0) {
+      finalizarError.value = 'Indica la duracion de la raid en minutos (mayor a 0).';
+      return;
+    }
+    await raidService.finalizar(
+      raidAFinalizar.value.raid.idRaid,
+      Number(duracionMinutos.value),
+      danosForm.value.map(d => ({ idPersonaje: d.idPersonaje, dano: Number(d.dano) || 0 })),
+    );
+    success.value = 'Boss abatido: el botin se repartio y el ranking de clanes se actualizo.';
     showFinalizar.value = false;
     await cargarTodo();
     emit('refrescar');
@@ -361,8 +383,37 @@ function estadoClass(estado: string) {
     <div v-if="showFinalizar" class="modal-overlay" @click.self="showFinalizar = false">
       <div class="modal modal-lg">
         <h3>Finalizar: {{ raidAFinalizar?.raid.nombreRaid }}</h3>
-        <p class="hint-mini">Todos los participantes confirmados recibiran un item al azar en su pool de canje.</p>
+        <p class="hint-mini">
+          Registra las metricas del encuentro. Al confirmar, la raid pasa a BOSS_MUERTO: el
+          Change Stream reparte el botin en una transaccion y recalcula el ranking de clanes.
+        </p>
         <div v-if="finalizarError" class="alert alert-error">{{ finalizarError }}</div>
+
+        <div class="form-row">
+          <label>Tiempo de finalizacion (minutos)</label>
+          <input v-model.number="duracionMinutos" type="number" min="1" max="600" class="input-num">
+        </div>
+
+        <h4 class="sub-title">Dano por asistente confirmado</h4>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Personaje</th><th>Rol</th><th>Dano</th></tr></thead>
+            <tbody>
+              <tr v-for="d in danosForm" :key="d.idPersonaje">
+                <td class="player-name">{{ d.nombre }}</td>
+                <td>{{ d.rol }}</td>
+                <td><input v-model.number="d.dano" type="number" min="0" class="input-num"></td>
+              </tr>
+              <tr v-if="danosForm.length === 0">
+                <td colspan="3" class="empty-cell">No hay asistentes confirmados.</td>
+              </tr>
+            </tbody>
+            <tfoot v-if="danosForm.length > 0">
+              <tr><td colspan="2"><strong>Dano total</strong></td>
+                  <td class="dkp-val">{{ danoTotalForm.toLocaleString('es-CL') }}</td></tr>
+            </tfoot>
+          </table>
+        </div>
         <div class="modal-actions">
           <button class="btn-cancel" @click="showFinalizar = false">Cancelar</button>
           <button class="btn-primary" @click="confirmarFinalizar">Finalizar y repartir</button>
@@ -373,6 +424,10 @@ function estadoClass(estado: string) {
 </template>
 
 <style scoped>
+.form-row { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.form-row label { font-size: 13px; color: var(--text-dim); }
+.input-num { width: 140px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.sub-title { margin: 14px 0 6px; font-size: 14px; }
 .raids-view { display: flex; flex-direction: column; gap: 18px; padding: 24px; }
 .view-header { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px; }
 .view-subtitle { color: var(--text-dim); font-size: 14px; }

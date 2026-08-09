@@ -20,6 +20,7 @@ public class Raid {
     private Integer healers;
     private Integer dps;
     private String estado; // "PROGRAMADA", "BOSS_MUERTO", "COMPLETADA"
+    private Integer duracionMinutos; // tiempo de finalizacion del encuentro
     private List<InscripcionRaid> inscripciones = new ArrayList<>();
 
     @Data
@@ -28,5 +29,6 @@ public class Raid {
         private Integer idPersonaje;
         private String rolEnRaid;
         private Boolean confirmado = false;
+        private Integer dano = 0; // dano aportado por el personaje en la raid
     }
 }

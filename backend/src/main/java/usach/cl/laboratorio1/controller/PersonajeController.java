@@ -9,6 +9,7 @@ import usach.cl.laboratorio1.tablas.Usuario;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -31,6 +32,8 @@ public class PersonajeController {
 
     // GET /api/personajes?page=0&size=10
     // FIX BUG 7: paginacion agregada
+    // RBAC: el listado global de personajes es una vista de administracion.
+    @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
     public List<Personaje> findAll(
             @RequestParam(defaultValue = "0") int page,
@@ -40,11 +43,6 @@ public class PersonajeController {
 
     // GET /api/personajes/3 - Obtener un personaje por su ID
 
-    @GetMapping("/{id}")
-    public ResponseEntity<Personaje> findById(@PathVariable Integer id) {
-        Personaje p = personajeRepository.findById(id);
-        return p != null ? ResponseEntity.ok(p) : ResponseEntity.notFound().build();
-    }
 
     // GET /api/personajes/mis-personajes
     // Devuelve solo los personajes del usuario autenticado (Req 2).
@@ -135,4 +133,10 @@ public class PersonajeController {
         public String nuevoRol;
     }
 
+
+    @GetMapping("/{id}")
+    public ResponseEntity<Personaje> findById(@PathVariable Integer id) {
+        Personaje p = personajeRepository.findById(id);
+        return p != null ? ResponseEntity.ok(p) : ResponseEntity.notFound().build();
+    }
 }

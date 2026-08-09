@@ -136,8 +136,10 @@ export const raidService = {
   invitarRaiders(idRaid: number, idClan: number) {
     return apiRequest<string>('/raids/invitar-raiders', 'POST', { idRaid, idClan });
   },
-  finalizar(idRaid: number) {
-    return apiRequest<string>(`/raids/${idRaid}/finalizar`, 'POST');
+  finalizar(idRaid: number, duracionMinutos?: number,
+            danos?: { idPersonaje: number; dano: number }[]) {
+    return apiRequest<string>(`/raids/${idRaid}/finalizar`, 'POST',
+      { duracionMinutos, danos });
   },
   desinscribirse(idRaid: number, idPersonaje: number) {
     return apiRequest<string>(`/raids/desinscribirse?idRaid=${idRaid}&idPersonaje=${idPersonaje}`, 'DELETE');
@@ -160,7 +162,10 @@ export const itemService = {
   update(id: number, data: any) { return apiRequest<string>(`/items/${id}`, 'PUT', data); },
   remove(id: number) { return apiRequest<string>(`/items/${id}`, 'DELETE'); },
   getHistorial(idPersonaje: number) { return apiRequest<HistorialBotin[]>(`/items/historial/${idPersonaje}`); },
-  getRanking() { return apiRequest<RankingEntry[]>('/items/ranking'); },
+  /** Ranking de CLANES (Tarea 4): materializada clanes_rankeados. */
+  getRanking() { return apiRequest<any[]>('/items/ranking'); },
+  /** Ranking individual de jugadores. */
+  rankingJugadores() { return apiRequest<RankingEntry[]>('/items/ranking-jugadores'); },
   // Pool de canje del jugador y canje (v3)
   miPool(idPersonaje: number) {
     return apiRequest<any[]>(`/items/mi-pool/${idPersonaje}`);

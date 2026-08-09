@@ -48,6 +48,7 @@ public class ChangeStreamService {
 
                                             // 3. Actualizar la coleccion materializada de ranking de clanes
                                             itemRepository.refrescarRanking();
+                                            itemRepository.refrescarRankingClanes();
                                             System.out.println("Change Stream: Botin distribuido y ranking de clanes refrescado.");
                                         } catch (Exception ex) {
                                             System.err.println("Error procesando Change Stream para Raid " + idRaid + ": " + ex.getMessage());

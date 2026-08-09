@@ -173,15 +173,25 @@ public class RaidController {
 
     // Finalizar una raid: marca COMPLETADA, registra los drops y refresca ranking.
     @PostMapping("/{id}/finalizar")
-    public ResponseEntity<?> finalizar(@PathVariable Integer id, Authentication auth) {
+    public ResponseEntity<?> finalizar(@PathVariable Integer id,
+            @RequestBody(required = false) FinalizarRequest body, Authentication auth) {
         try {
             if (!esGuildMaster(auth.getName())) {
                 return ResponseEntity.status(403).body("Solo el Guild Master puede finalizar una raid.");
             }
-            raidRepository.finalizarRaid(id);
-            itemRepository.distribuirBotin(id);
-            itemRepository.refrescarRanking();
-            return ResponseEntity.ok("Raid finalizada, botin repartido y ranking actualizado.");
+            Integer duracion = (body != null) ? body.duracionMinutos : null;
+            java.util.Map<Integer, Integer> danos = new java.util.HashMap<>();
+            if (body != null && body.danos != null) {
+                for (DanoParticipante d : body.danos) {
+                    if (d.idPersonaje != null) {
+                        danos.put(d.idPersonaje, d.dano != null ? d.dano : 0);
+                    }
+                }
+            }
+            // Deja la raid en BOSS_MUERTO: el Change Stream (Tarea 6) reparte el
+            // botin en una transaccion y regenera las colecciones materializadas.
+            raidRepository.finalizarRaid(id, duracion, danos);
+            return ResponseEntity.ok("Boss abatido: el botin se reparte y el ranking se actualiza.");
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(ErrorUtil.msg(e));
         }
@@ -221,4 +231,15 @@ public class RaidController {
             return ResponseEntity.badRequest().body(ErrorUtil.msg(e));
         }
     }
-};
+
+    /** Metricas que informa el Guild Master al cerrar la raid. */
+    public static class FinalizarRequest {
+        public Integer duracionMinutos;
+        public java.util.List<DanoParticipante> danos;
+    }
+
+    public static class DanoParticipante {
+        public Integer idPersonaje;
+        public Integer dano;
+    }
+}

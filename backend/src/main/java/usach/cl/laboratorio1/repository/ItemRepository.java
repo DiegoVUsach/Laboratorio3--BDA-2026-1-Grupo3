@@ -388,4 +388,79 @@ public class ItemRepository {
         }
         return res;
     }
+
+    // =====================================================================
+    // TAREA 4 — Ranking de CLANES por desempeno en raids
+    // =====================================================================
+    // Metricas exigidas por el enunciado: tiempo de finalizacion, asistencia y
+    // dano total. Pipeline: $match -> $unwind -> $match -> $group(por clan)
+    // -> $lookup(clanes) -> $unwind -> $project -> $sort -> $merge.
+    // El $merge materializa el resultado en "clanes_rankeados", que es la
+    // coleccion de "clanes mejor rankeados" que pide la Tarea 6.
+    public void refrescarRankingClanes() {
+        java.util.List<org.bson.Document> pipeline = java.util.Arrays.asList(
+            new org.bson.Document("$match", new org.bson.Document("estado", "COMPLETADA")),
+            new org.bson.Document("$unwind", "$inscripciones"),
+            new org.bson.Document("$match", new org.bson.Document("inscripciones.confirmado", true)),
+            new org.bson.Document("$group", new org.bson.Document()
+                    .append("_id", "$idClan")
+                    .append("asistencia_total", new org.bson.Document("$sum", 1))
+                    .append("dano_total", new org.bson.Document("$sum",
+                            new org.bson.Document("$ifNull", java.util.Arrays.asList("$inscripciones.dano", 0))))
+                    .append("tiempo_promedio", new org.bson.Document("$avg",
+                            new org.bson.Document("$ifNull", java.util.Arrays.asList("$duracionMinutos", 0))))
+                    .append("raids_completadas", new org.bson.Document("$addToSet", "$_id"))),
+            new org.bson.Document("$lookup", new org.bson.Document()
+                    .append("from", "clanes")
+                    .append("localField", "_id")
+                    .append("foreignField", "_id")
+                    .append("as", "clan_info")),
+            new org.bson.Document("$unwind", "$clan_info"),
+            new org.bson.Document("$project", new org.bson.Document()
+                    .append("id_clan", "$_id")
+                    .append("nombre_clan", "$clan_info.nombreClan")
+                    .append("faccion", "$clan_info.faccion")
+                    .append("asistencia_total", 1)
+                    .append("dano_total", 1)
+                    .append("tiempo_promedio", new org.bson.Document("$round",
+                            java.util.Arrays.asList("$tiempo_promedio", 1)))
+                    .append("raids_completadas", new org.bson.Document("$size", "$raids_completadas"))
+                    .append("dano_por_minuto", new org.bson.Document("$round", java.util.Arrays.asList(
+                            new org.bson.Document("$divide", java.util.Arrays.asList("$dano_total",
+                                    new org.bson.Document("$max", java.util.Arrays.asList("$tiempo_promedio", 1)))), 1)))
+                    .append("puntaje", new org.bson.Document("$round", java.util.Arrays.asList(
+                            new org.bson.Document("$add", java.util.Arrays.asList(
+                                    new org.bson.Document("$divide", java.util.Arrays.asList("$dano_total",
+                                            new org.bson.Document("$max", java.util.Arrays.asList("$tiempo_promedio", 1)))),
+                                    new org.bson.Document("$multiply", java.util.Arrays.asList("$asistencia_total", 50)))), 0)))),
+            new org.bson.Document("$sort", new org.bson.Document()
+                    .append("puntaje", -1).append("dano_total", -1).append("tiempo_promedio", 1)),
+            new org.bson.Document("$merge", new org.bson.Document()
+                    .append("into", "clanes_rankeados")
+                    .append("whenMatched", "replace")
+                    .append("whenNotMatched", "insert"))
+        );
+        mongoTemplate.getCollection("clanes_rankeados").deleteMany(new org.bson.Document());
+        mongoTemplate.getCollection("raids").aggregate(pipeline).toCollection();
+    }
+
+    /** Lee la coleccion materializada de clanes mejor rankeados. */
+    public List<Map<String, Object>> obtenerRankingClanes() {
+        List<Map<String, Object>> res = new ArrayList<>();
+        for (org.bson.Document d : mongoTemplate.getCollection("clanes_rankeados")
+                .find().sort(new org.bson.Document("puntaje", -1))) {
+            Map<String, Object> m = new HashMap<>();
+            m.put("id_clan", d.get("id_clan"));
+            m.put("nombre_clan", d.get("nombre_clan"));
+            m.put("faccion", d.get("faccion"));
+            m.put("asistencia_total", d.get("asistencia_total"));
+            m.put("dano_total", d.get("dano_total"));
+            m.put("tiempo_promedio", d.get("tiempo_promedio"));
+            m.put("raids_completadas", d.get("raids_completadas"));
+            m.put("dano_por_minuto", d.get("dano_por_minuto"));
+            m.put("puntaje", d.get("puntaje"));
+            res.add(m);
+        }
+        return res;
+    }
 }

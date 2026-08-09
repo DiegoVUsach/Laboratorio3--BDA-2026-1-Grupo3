@@ -84,149 +84,92 @@ El proyecto incluye lógica directamente en PostgreSQL:
 
 ---
 
-## Lab 2 — Capa geoespacial (PostGIS) y mundo virtual
 
-### Motor y despliegue
-La imagen de base de datos es `postgis/postgis:16-3.4` (PostgreSQL 16 con PostGIS 3.4).
-Los scripts se ejecutan automaticamente en este orden al levantar el contenedor:
+## Modelado de datos: embedding vs referencing
 
-| Orden | Archivo | Contenido |
+El enunciado exige justificar la decision para cada coleccion. El criterio es el patron
+de acceso: se **embebe** lo que siempre se lee junto al documento padre y tiene tamano
+acotado, y se **referencia** lo que crece sin limite o se consulta por si mismo.
+
+| Coleccion | Decision | Justificacion |
 |---|---|---|
-| 01 | `script_db.sql` | Esquema relacional, triggers, procedimientos, vista de ranking |
-| 02 | `script_gis.sql` | Extension PostGIS, columnas geometricas, indices GIST, funciones espaciales |
-| 03 | `load_data.sql` | Datos de prueba: 3 clanes, 34 personajes, 20 items, 10 raids |
-| 04 | `load_data_gis.sql` | Mundo virtual: regiones, sedes, encuentros y sedes de poder |
+| `personajes` | **Referenciada** | Decision central de la Tarea 1. Cada personaje participa en **multiples raids de forma independiente**, y las raids lo referencian por su id. Embebido dentro del jugador habria que duplicarlo o hacer consultas anidadas costosas; ademas su itemLevel y DKP cambian seguido y deben vivir en un solo lugar. |
+| `personajes.inventario` | **Embebido** | Relacion 1:1, siempre se lee con el personaje y su tamano es acotado (tres slots y la bolsa). |
+| `raids.inscripciones` | **Embebido** | Solo tienen sentido dentro de su raid y su cantidad esta acotada por el grupo. Permite leer la raid completa en una consulta y es lo que habilita el `$unwind` del pipeline de ranking. |
+| `clanes.auditoriaLiderazgo` | **Embebido** | Historial corto que se consulta siempre con el clan. |
+| `loot_pool` | **Referenciada** | Crece de forma independiente y se consulta por personaje; necesita validador e indice unico propios. |
+| `items` | **Referenciada** | Catalogo compartido: muchos personajes apuntan al mismo item. |
+| `historial_botin` | **Referenciada** | Crece sin limite; embebido haria crecer el documento del personaje indefinidamente. |
+| `notificaciones` | **Referenciada** | Alto volumen y expiracion automatica por TTL. |
+| `clan_rankings` / `clanes_rankeados` | **Materializadas** | Salida de los Aggregation Pipelines escrita con `$merge`. |
 
-**Importante:** para reconstruir la base desde cero hay que borrar el volumen:
+## Estrategia de indices
 
-```bash
-docker compose down -v
-docker compose up --build
-```
-
-### El mundo virtual "Aethermoor"
-Todo el componente espacial ocurre dentro del mundo del juego, modelado como un plano
-cartesiano de **300 x 200 metros** (SRID 0). No se usan coordenadas GPS reales: la
-"ubicacion" de un jugador es su posicion dentro del mundo, que es lo que tiene sentido
-en un MMORPG. El continente se divide en **9 regiones** (poligonos en `region_mapa`) que cubren el mapa
-completo en una grilla de 3 x 3: Pantano de Murkmire, Llanuras de Ceniza y Abismo Sombrio
-al sur; Bosque de Elderwood, Ciudadela de Aurora y Desierto de Zar'Kuun al centro; Picos
-Helados de Kaltharn, Estepas de Hierro e Islas del Alba al norte. Todas las distancias se
-expresan en **metros del mundo**; el radio de botin del jefe es de 50 m, una porcion
-significativa de una region, de modo que la mecanica de proximidad se aprecia con claridad.
-El frontend dibuja este mapa con Leaflet en modo `L.CRS.Simple` (sin tiles ni mapas de calles).
-
-### Columnas espaciales e indices GIST
-| Tabla | Columna | Uso |
+| Indice | Tipo | Para que |
 |---|---|---|
-| `clanes` | `sede` | Sede del clan (clanes cercanos, heatmap) |
-| `raids` | `ubicacion` | Lugar de la raid en el mundo |
-| `raids` | `punto_muerte_boss` | Punto de muerte del jefe (radio de botin) |
-| `inscripciones_raid` | `posicion` | Posicion del personaje en el encuentro |
-| `personaje` | `ubicacion` | Posicion del jugador en el mundo |
-| `auditoria_liderazgo` | `coordenadas` | Sede de Poder (auditoria territorial) |
-| `region_mapa` | `geom` | Poligonos de las regiones |
+| `personajes {idClan, clase, rolClan}` | Compuesto | Filtrar personajes disponibles por clase y rol dentro de un clan (Tarea 5). |
+| `personajes {nombrePersonaje}` | Unico | Impide nombres de personaje repetidos (Tarea 5). |
+| `loot_pool {idRaid, idItem}` | Unico compuesto | Impide que un mismo item quede asignado dos veces en la misma raid ante solicitudes concurrentes. |
+| `items {nombreItem}` | Texto | Buscador del catalogo por contenido. |
+| `notificaciones {fecha}`, `loot_pool {fecha}` | TTL (30 dias) | Expiracion automatica de datos temporales. |
+| `raids {idClan, estado}` | Compuesto | Calendario del clan filtrado por estado. |
+| `loot_pool {idPersonaje, canjeado}` | Compuesto | Pool de canje pendiente de un personaje. |
+| `usuarios {nombreUsuario}`, `clanes {nombreClan}` | Unicos | Integridad de identificadores. |
 
-Los 7 indices son GIST (`idx_gist_*`), obligatorios por enunciado para optimizar las
-consultas de proximidad (`ST_DWithin`, operador KNN `<->`) y de contencion (`ST_Contains`).
+## Las 6 tareas del Grupo 3
 
-### Las 6 tareas del Grupo 3
-1. **Componente espacial** — ubicacion de clanes y de raids (tabla anterior).
-2. **Endpoint de proximidad** — `GET /api/geo/clanes/cercanos?x=&y=` devuelve los clanes
-   mas cercanos en **GeoJSON**, ordenados con el operador KNN sobre el indice GIST.
-3. **Vista materializada** — `vista_heatmap_clanes` agrega por clan el **item level total**
-   (poder militar), el promedio, los miembros y los DKP. El mapa de calor usa el item level
-   total como peso, porque los DKP son la moneda para canjear items y no miden poder. Se
-   expone como GeoJSON en `GET /api/geo/clanes/heatmap`.
-4. **Mecanica de proximidad** — `sp_distribuir_botin` reparte el botin **solo** a los
-   asistentes confirmados cuya `posicion` esta dentro de 50 metros del
-   `punto_muerte_boss` (`ST_DWithin`). Antes de finalizar, el lider ve la lista de quienes
-   califican y quienes quedan fuera (`fn_elegibles_botin` / `fn_excluidos_botin`).
-5. **Formacion de grupos** — el **tanque lider** es el tanque inscrito con mayor item level
-   (`fn_tanque_lider`). `fn_healers_misma_region_que_tanque` determina su region por
-   contencion (`ST_Contains`) y lista los healers confirmados de esa misma region. En el
-   detalle de la raid esto se ve tambien sobre el mapa del encuentro.
-6. **Auditoria territorial** — al transferir el liderazgo, el trigger
-   `funcion_auditar_liderazgo` guarda las coordenadas del acto en `auditoria_liderazgo`;
-   `fn_sedes_poder_geojson` arma el mapa historico de "Sedes de Poder" del clan.
-
-### API geoespacial
-Todos los endpoints de mapa devuelven **GeoJSON** (`FeatureCollection`) y todos reciben
-coordenadas `x`/`y` del mundo virtual.
-
-| Metodo | Endpoint | Descripcion |
+| # | Tarea | Donde |
 |---|---|---|
-| GET | `/api/geo/regiones` | Regiones del mundo (poligonos) |
-| GET | `/api/geo/clanes/cercanos?x=&y=&limit=` | Clanes mas cercanos a una posicion |
-| GET | `/api/geo/clanes/cercanos-de/{idPersonaje}` | Clanes cercanos al personaje |
-| GET | `/api/geo/clanes/heatmap` | Mapa de calor de clanes (vista materializada) |
-| POST | `/api/geo/clanes/heatmap/refrescar` | Refresca la vista materializada |
-| GET | `/api/geo/clanes/{id}/sedes-poder` | Mapa historico de Sedes de Poder |
-| GET | `/api/geo/raids/mapa?idClan=` | Raids ubicadas en el mundo |
-| GET | `/api/geo/raids/{id}/encuentro` | Posiciones de los asistentes, distancia al jefe y marca del tanque lider |
-| GET | `/api/geo/raids/{id}/boss` | Punto de muerte del jefe |
-| GET | `/api/geo/raids/{id}/tanque-lider` | Tanque inscrito con mayor item level |
-| GET | `/api/geo/personajes/{id}/ubicacion` | Posicion del personaje en el mundo |
-| GET | `/api/geo/raids/{id}/elegibles-botin` | Asistentes dentro del radio de 50u |
-| GET | `/api/geo/raids/{id}/excluidos-botin` | Asistentes fuera del radio |
-| GET | `/api/geo/raids/{id}/healers-region` | Healers en la region del tanque lider |
-| PUT | `/api/geo/clanes/{id}/ubicacion` | `{ x, y }` sede del clan |
-| PUT | `/api/geo/personajes/{id}/ubicacion` | `{ x, y }` posicion del jugador |
-| PUT | `/api/geo/raids/{id}/geo` | `{ x, y, bossX, bossY }` |
-| PUT | `/api/geo/raids/{idRaid}/posicion/{idPersonaje}` | `{ x, y }` posicion en el encuentro |
+| 1 | Modelado embedding/referencing | `mongo-init/init.js` + tabla de arriba |
+| 2 | Schema Validation (`$jsonSchema`) | validador de `loot_pool`: `participoRaid: [true]`, `personajeCaido: [false]` |
+| 3 | Transaccion multi-documento | `ItemRepository.distribuirBotin()` con `TransactionTemplate` |
+| 4 | Aggregation Pipeline: ranking de clanes por **tiempo, asistencia y dano** | `ItemRepository.refrescarRankingClanes()` |
+| 5 | Indices | seccion de indices en `init.js` |
+| 6 | Change Streams + materializada | `service/ChangeStreamService.java` -> `clanes_rankeados` |
 
-Ejemplo de respuesta (`/api/geo/clanes/cercanos?x=600&y=400&limit=2`):
+## Flujo de una raid (Change Streams)
 
+1. El Guild Master pulsa **Finalizar** y registra el **tiempo de finalizacion** y el
+   **dano de cada asistente** (`POST /api/raids/{id}/finalizar`).
+2. El backend guarda las metricas y deja la raid en **`BOSS_MUERTO`**.
+3. El **Change Stream** detecta el cambio y, de forma reactiva: reparte el botin en una
+   **transaccion**, marca la raid `COMPLETADA` y regenera las materializadas
+   `clan_rankings` (jugadores) y **`clanes_rankeados`** (clanes mejor rankeados).
+4. El frontend muestra el botin nuevo y el ranking actualizado.
+
+**POST `/api/raids/{id}/finalizar`**
 ```json
 {
-  "type": "FeatureCollection",
-  "features": [
-    {
-      "type": "Feature",
-      "geometry": { "type": "Point", "coordinates": [600, 400] },
-      "properties": {
-        "id_clan": 1,
-        "nombre_clan": "Los Heraldos de Aurora",
-        "distancia": 0.0,
-        "region": "Ciudadela de Aurora"
-      }
-    }
+  "duracionMinutos": 42,
+  "danos": [
+    { "idPersonaje": 1, "dano": 148000 },
+    { "idPersonaje": 2, "dano": 41000 }
   ]
 }
 ```
 
-### Frontend
-Interfaz Vue 3 + Vite organizada en cuatro pestañas, de lo privado a lo global:
-- **Mi Personaje** — ficha, equipamiento (equipar y desequipar, que recalcula el item
-  level), bolsa, botin por canjear e historial.
-- **Mi Clan** — miembros, asignacion de roles, transferencia de liderazgo y el mapa
-  historico de **Sedes de Poder**.
-- **Raids** — solo las raids del clan, con el mapa del mundo mostrando cada raid, su radio
-  de botin y la posicion del jugador; filtro pendientes/completadas; confirmacion de
-  invitaciones desde la propia lista; detalle del encuentro con el radio del jefe, los
-  asistentes confirmados, el tanque lider y los healers de su region; y finalizacion con
-  la vista previa de quienes reciben botin.
-- **Mundo** — mapa de poder de los clanes (el propio destacado y la posicion del jugador),
-  ranking de jugadores con filtros (mi clan / mi faccion / global), ranking de clanes por
-  item level y consulta de clanes cercanos.
+**GET `/api/items/ranking`** (ranking de clanes, Tarea 4)
+```json
+[
+  {
+    "id_clan": 1, "nombre_clan": "Los Primordiales de la Luz",
+    "raids_completadas": 1, "asistencia_total": 6,
+    "dano_total": 704000, "tiempo_promedio": 42,
+    "dano_por_minuto": 16761.9, "puntaje": 17062
+  }
+]
+```
 
-Las notificaciones estan siempre disponibles desde la barra lateral, en cualquier pestaña.
-La posicion del personaje en el mundo se define al crearlo y es la que se usa al inscribirse
-en una raid. Todas las fechas se muestran en formato chileno (dd/mm/aaaa). Todos los mapas
-se dibujan sobre el mundo virtual con Leaflet (`L.CRS.Simple`), sin mapas de calles ni
-servicios externos de tiles.
+## Control de acceso (RBAC)
 
-### Datos de prueba
-3 clanes con plantilla completa y 34 personajes (incluye 2 sin clan para probar el
-alta en clan), 20 items, 10 raids (3 de ellas encuentros espaciales con jefe, una por
-clan) y 9 registros de traspaso de mando para el mapa de Sedes de Poder.
+- **Middleware JWT** (`config/JwtFilter`): valida el token y publica usuario y rol.
+- **Rol del sistema** (`ADMIN` / `USER`), viaja en el token y se aplica con
+  `@PreAuthorize("hasRole('ADMIN')")` sobre la administracion del catalogo de items y
+  el listado global de personajes.
+- **Rol de juego** (`Guild Master` / `Raider` / `Member`), vive en el documento del
+  personaje y se verifica en los controladores para crear, modificar y finalizar
+  raids, invitar raiders, asignar roles y traspasar el liderazgo.
 
-**Credenciales:** todos los usuarios usan la contraseña `123456`.
-`admin` (rol ADMIN, controla a *Arthon*, Guild Master del clan 1) y
-`jugador1` ... `jugador33` (rol USER).
-
-
----
 
 ## Guia de demostracion
 

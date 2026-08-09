@@ -122,7 +122,17 @@ public class RaidRepository {
     }
 
     // Finalizar raid: los participantes confirmados reciben botin desde el controlador.
-    public void finalizarRaid(Integer idRaid) {
+    /**
+     * Cierra una raid registrando las metricas de desempeno que informa el Guild
+     * Master (tiempo de finalizacion y dano por participante), que alimentan el
+     * ranking de clanes.
+     *
+     * La raid queda en estado BOSS_MUERTO: es el evento de "muerte del Boss" que
+     * detecta el Change Stream, el cual distribuye el botin dentro de una
+     * transaccion, marca la raid COMPLETADA y regenera las materializadas.
+     */
+    public void finalizarRaid(Integer idRaid, Integer duracionMinutos,
+                              java.util.Map<Integer, Integer> danoPorPersonaje) {
         Raid raid = mongoTemplate.findById(idRaid, Raid.class);
         if (raid == null) {
             throw new RuntimeException("La raid con ID " + idRaid + " no existe.");
@@ -130,8 +140,26 @@ public class RaidRepository {
         if ("COMPLETADA".equals(raid.getEstado())) {
             throw new RuntimeException("La raid " + idRaid + " ya estaba finalizada.");
         }
+        if (duracionMinutos != null && duracionMinutos <= 0) {
+            throw new RuntimeException("La duracion de la raid debe ser mayor a 0 minutos.");
+        }
 
-        raid.setEstado("COMPLETADA");
+        raid.setDuracionMinutos(duracionMinutos != null ? duracionMinutos : 45);
+        if (raid.getInscripciones() != null) {
+            for (Raid.InscripcionRaid ins : raid.getInscripciones()) {
+                Integer dano = (danoPorPersonaje != null) ? danoPorPersonaje.get(ins.getIdPersonaje()) : null;
+                if (dano != null) {
+                    if (dano < 0) {
+                        throw new RuntimeException("El dano no puede ser negativo.");
+                    }
+                    ins.setDano(dano);
+                } else if (ins.getDano() == null) {
+                    ins.setDano(0);
+                }
+            }
+        }
+
+        raid.setEstado("BOSS_MUERTO");
         mongoTemplate.save(raid);
     }
 }
