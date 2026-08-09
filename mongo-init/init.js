@@ -27,6 +27,13 @@ try {
 // Conectar a la base de datos de la aplicacion
 db = db.getSiblingDB("laboratorio1");
 
+// Guard de idempotencia: si la coleccion ya existe, el script no vuelve a crear nada.
+var colecciones = db.getCollectionNames();
+if (colecciones.indexOf("usuarios") !== -1) {
+    print("Base de datos ya inicializada. Saltando creacion de colecciones e insercion de datos.");
+    quit(0);
+}
+
 // Crear colecciones con validadores Schema Validation
 print("Creando colecciones con validadores...");
 
@@ -241,7 +248,7 @@ db.createCollection("clan_rankings");
 print("Creando indices...");
 
 // compuesto para filtrar rápidamente personajes por clase y rol dentro de un clan (requisito de indices)
-db.personajes.createIndex({ idClan: 1, clase: 1, rolClan: 1 });
+db.personajes.createIndex({ clase: 1, rolClan: 1 });
 
 // unico sobre el nombre del personaje (requisito de indices)
 db.personajes.createIndex({ nombrePersonaje: 1 }, { unique: true });
@@ -257,6 +264,12 @@ db.loot_pool.createIndex({ fecha: 1 }, { expireAfterSeconds: 2592000 });
 // indices compuestos frecuentes
 db.raids.createIndex({ idClan: 1, estado: 1 });
 db.loot_pool.createIndex({ idPersonaje: 1, canjeado: 1 });
+
+// unico en loot_pool para evitar doble asignacion (requisito Tarea 3)
+db.loot_pool.createIndex({ idRaid: 1, idItem: 1 }, { unique: true });
+
+// indice de texto para busqueda por contenido (requisito de indices)
+db.items.createIndex({ nombreItem: "text", rareza: "text" });
 
 print("Indices creados.");
 
@@ -279,9 +292,9 @@ db.database_sequences.insertMany([
 
 // 1. Usuarios
 db.usuarios.insertMany([
-    { idUsuario: 1, nombreUsuario: "admin", password: "$2a$10$tP6P6c6G/n0N1Z2.2E2.2.p.q.r.s.t.u.v.w.x.y.z", rol: "ADMIN" }, // pass: 123456
-    { idUsuario: 2, nombreUsuario: "martin", password: "$2a$10$tP6P6c6G/n0N1Z2.2E2.2.p.q.r.s.t.u.v.w.x.y.z", rol: "USER" },
-    { idUsuario: 3, nombreUsuario: "seba", password: "$2a$10$tP6P6c6G/n0N1Z2.2E2.2.p.q.r.s.t.u.v.w.x.y.z", rol: "USER" }
+    { idUsuario: 1, nombreUsuario: "admin", password: "$2b$10$19GqzS29tj2iBe5dgvq7yuPsdXhCX3DLA4Zn3nLzUNvmsuq7JnIG6", rol: "ADMIN" }, // pass: 123456
+    { idUsuario: 2, nombreUsuario: "martin", password: "$2b$10$19GqzS29tj2iBe5dgvq7yuPsdXhCX3DLA4Zn3nLzUNvmsuq7JnIG6", rol: "USER" },
+    { idUsuario: 3, nombreUsuario: "seba", password: "$2b$10$19GqzS29tj2iBe5dgvq7yuPsdXhCX3DLA4Zn3nLzUNvmsuq7JnIG6", rol: "USER" }
 ]);
 
 // 2. Clanes
@@ -297,7 +310,12 @@ db.items.insertMany([
     { idItem: 2, nombreItem: "Escudo del Guardian Celestino", rareza: "Epica", tipo: "ARMADURA", nivel: 70, costoDkp: 100 },
     { idItem: 3, nombreItem: "Anillo del Viento Gris", rareza: "Poco Comun", tipo: "ACCESORIO", nivel: 45, costoDkp: 20 },
     { idItem: 4, nombreItem: "Amuleto de las Profundidades", rareza: "Legendaria", tipo: "ACCESORIO", nivel: 80, costoDkp: 250 },
-    { idItem: 5, nombreItem: "Baston de Sanacion Divina", rareza: "Rara", tipo: "ARMA", nivel: 60, costoDkp: 60 }
+    { idItem: 5, nombreItem: "Baston de Sanacion Divina", rareza: "Rara", tipo: "ARMA", nivel: 60, costoDkp: 60 },
+    { idItem: 6, nombreItem: "Yelmo del Conquistador", rareza: "Epica", tipo: "ARMADURA", nivel: 60, costoDkp: 80 },
+    { idItem: 7, nombreItem: "Arco Canta-Vientos", rareza: "Rara", tipo: "ARMA", nivel: 65, costoDkp: 55 },
+    { idItem: 8, nombreItem: "Grebas de Escarcha", rareza: "Comun", tipo: "ARMADURA", nivel: 50, costoDkp: 15 },
+    { idItem: 9, nombreItem: "Mazo de los Titanes", rareza: "Legendaria", tipo: "ARMA", nivel: 85, costoDkp: 300 },
+    { idItem: 10, nombreItem: "Talisman de Sombras", rareza: "Epica", tipo: "ACCESORIO", nivel: 75, costoDkp: 120 }
 ]);
 
 // 4. Personajes
@@ -321,6 +339,21 @@ db.personajes.insertMany([
         idPersonaje: 4, idUsuario: 2, idClan: null, nombrePersonaje: "Kiiro", clase: "Paladin",
         faccion: "Los Hijos del Gris", rolClan: "Member", nivel: 1, itemLevel: 0, puntosDkpActuales: 0, caido: true, // caido por defecto para pruebas
         inventario: { idInventario: 4, armaduraEquipado: null, armaEquipado: null, accesorioEquipado: null, items: [] }
+    },
+    {
+        idPersonaje: 5, idUsuario: 3, idClan: 1, nombrePersonaje: "Valerius", clase: "Cazador",
+        faccion: "Los Primordiales de la Luz", rolClan: "Raider", nivel: 60, itemLevel: 200, puntosDkpActuales: 320, caido: false,
+        inventario: { idInventario: 5, armaduraEquipado: 8, armaEquipado: 7, accesorioEquipado: null, items: [] }
+    },
+    {
+        idPersonaje: 6, idUsuario: 1, idClan: 2, nombrePersonaje: "Morgath", clase: "Brujo",
+        faccion: "Los Hijos del Gris", rolClan: "Raider", nivel: 55, itemLevel: 140, puntosDkpActuales: 110, caido: false,
+        inventario: { idInventario: 6, armaduraEquipado: null, armaEquipado: null, accesorioEquipado: 10, items: [] }
+    },
+    {
+        idPersonaje: 7, idUsuario: 2, idClan: 3, nombrePersonaje: "Zephyr", clase: "Picaro",
+        faccion: "Los Marcados por el Abismo", rolClan: "Guild Master", nivel: 70, itemLevel: 250, puntosDkpActuales: 600, caido: false,
+        inventario: { idInventario: 7, armaduraEquipado: 6, armaEquipado: null, accesorioEquipado: 4, items: [] }
     }
 ]);
 
@@ -331,14 +364,23 @@ db.raids.insertMany([
         itemLevelMinimo: 100, tanques: 1, healers: 1, dps: 3, estado: "PROGRAMADA",
         inscripciones: [
             { idInscripcion: 1, idPersonaje: 1, rolEnRaid: "Tanque", confirmado: true },
-            { idInscripcion: 2, idPersonaje: 2, rolEnRaid: "Healer", confirmado: true }
+            { idInscripcion: 2, idPersonaje: 2, rolEnRaid: "Healer", confirmado: true },
+            { idInscripcion: 4, idPersonaje: 5, rolEnRaid: "Dps", confirmado: true }
         ]
     },
     {
         idRaid: 2, idClan: 2, nombreRaid: "El Despertar del Dragon Sombrio", fechaRaid: new Date(),
         itemLevelMinimo: 80, tanques: 1, healers: 1, dps: 2, estado: "COMPLETADA",
         inscripciones: [
-            { idInscripcion: 3, idPersonaje: 3, rolEnRaid: "Dps", confirmado: true }
+            { idInscripcion: 3, idPersonaje: 3, rolEnRaid: "Dps", confirmado: true },
+            { idInscripcion: 5, idPersonaje: 6, rolEnRaid: "Healer", confirmado: true }
+        ]
+    },
+    {
+        idRaid: 3, idClan: 3, nombreRaid: "Caida del Rey Demonio", fechaRaid: new Date(),
+        itemLevelMinimo: 150, tanques: 2, healers: 2, dps: 5, estado: "COMPLETADA",
+        inscripciones: [
+            { idInscripcion: 6, idPersonaje: 7, rolEnRaid: "Dps", confirmado: true }
         ]
     }
 ]);

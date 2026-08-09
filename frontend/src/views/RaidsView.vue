@@ -8,7 +8,7 @@
 import { ref, onMounted, computed } from 'vue';
 import { raidService, inscripcionService, type RaidDTO } from '../services/api';
 import { fechaCL, fechaHoraCL, clAIso } from '../utils/format';
-import { fechaCL, fechaHoraCL, clAIso } from '../utils/format';
+
 
 const props = defineProps<{ character: any; token: string }>();
 const emit = defineEmits<{ (e: 'refrescar'): void }>();
@@ -292,9 +292,7 @@ function estadoClass(estado: string) {
           <div><label>Healers</label><input v-model.number="newRaid.healers" type="number" min="0"></div>
           <div><label>DPS</label><input v-model.number="newRaid.dps" type="number" min="0"></div>
         </div>
-        <label>Lugar de la raid</label>
-        <p class="hint-mini">Haz clic en el mapa para marcar donde ocurrirá el encuentro. El radio rojo indica la zona donde los personajes deberán estar al finalizar la raid para recibir botín.</p>
-        <WorldMap :markers="markersCrear" :pickable="true" height="440px" @pick="(p) => { newRaid.x = p.x; newRaid.y = p.y; }" />
+
         <div class="modal-actions">
           <button class="btn-cancel" @click="showCrear = false">Cancelar</button>
           <button class="btn-primary" @click="crearRaid">Crear raid</button>
@@ -311,17 +309,7 @@ function estadoClass(estado: string) {
         <div class="role-options">
           <button v-for="r in rolesRaid" :key="r" :class="{ selected: rolEnRaid === r }" @click="rolEnRaid = r">{{ r }}</button>
         </div>
-        <label>Tu posicion frente al jefe</label>
-        <p class="hint-mini">
-          Tu posicion en el mundo se fijo al crear el personaje y no cambia aqui.
-          <span v-if="distanciaAlBoss !== null">
-            Estas a <strong>{{ distanciaAlBoss }} metros</strong> del jefe:
-            <strong :class="distanciaAlBoss <= 50 ? 'ok' : 'ko'">
-              {{ distanciaAlBoss <= 50 ? 'dentro del radio de botin' : 'fuera del radio de botin' }}
-            </strong>.
-          </span>
-        </p>
-        <WorldMap :markers="markersInscripcion" height="440px" />
+
         <div class="modal-actions">
           <button class="btn-cancel" @click="showInscribirse = false">Cancelar</button>
           <button class="btn-primary" @click="inscribirse">Inscribirme</button>
@@ -362,38 +350,9 @@ function estadoClass(estado: string) {
           </table>
         </div>
 
-        <h4 class="sub">Mapa del encuentro</h4>
-        <p class="hint-mini">
-          El circulo rojo marca el radio de botin (50 metros) alrededor del jefe. Se muestran los asistentes
-          confirmados: verde dentro del radio, rojo fuera. El tanque lider (el tanque de mayor iLvl) aparece en morado.
-          <span v-if="raidDetalle?.raid.estado === 'COMPLETADA'">
-            Esta raid ya se jugo: las posiciones son las que quedaron registradas durante el encuentro.
-          </span>
-          <span v-else>Las posiciones son las que cada jugador tiene ahora en el mundo.</span>
-        </p>
-        <WorldMap :markers="markersEncuentro" height="480px" />
 
-        <h4 class="sub">Formacion de grupo: healers en la region del tanque lider</h4>
-        <p class="hint-mini">
-          <span v-if="tanqueLider">
-            Tanque lider: <strong>{{ tanqueLider.nombre_personaje }}</strong> (iLvl {{ tanqueLider.item_level }}),
-            en la region <strong>{{ tanqueLider.region || 'tierras salvajes' }}</strong>.
-          </span>
-          <span v-else>Esta raid no tiene un tanque inscrito con posicion registrada.</span>
-        </p>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead><tr><th>Healer</th><th>Region</th><th>Estado</th></tr></thead>
-            <tbody>
-              <tr v-for="h in healersRegion" :key="h.id_personaje">
-                <td class="player-name">{{ h.nombre_personaje }}</td>
-                <td>{{ h.region }}</td>
-                <td class="ok">Misma region que el tanque lider</td>
-              </tr>
-              <tr v-if="healersRegion.length === 0"><td colspan="3" class="empty-cell">Ningun healer confirmado comparte region con el tanque lider</td></tr>
-            </tbody>
-          </table>
-        </div>
+
+
 
         <div class="modal-actions"><button class="btn-cancel" @click="showDetalle = false">Cerrar</button></div>
       </div>

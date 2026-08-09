@@ -7,6 +7,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.PlatformTransactionManager;
 import usach.cl.laboratorio1.tablas.*;
 import usach.cl.laboratorio1.service.SequenceGeneratorService;
 
@@ -24,6 +25,10 @@ public class ItemRepository {
 
     @Autowired
     private PersonajeRepository personajeRepository;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
 
     public List<Item> findAll(int page, int size) {
         Query query = new Query().with(PageRequest.of(page, size, Sort.by("idItem").ascending()));
@@ -156,11 +161,10 @@ public class ItemRepository {
         mongoTemplate.save(notif);
     }
 
-    // Tarea 3: Transaccion multi-documento para distribuir Loot.
-    // Usamos @org.springframework.transaction.annotation.Transactional para asegurar
-    // que la operacion sea atomica. Si un item no puede ser asignado (ej. por validacion
-    // del $jsonSchema de MongoDB al estar el jugador caido), la transaccion completa se revierte.
-    @org.springframework.transaction.annotation.Transactional
+    // Tarea 3: Transaccion multi-documento REAL para distribuir Loot.
+    // Usamos TransactionTemplate con sesion explicita para garantizar atomicidad.
+    // Filtramos ANTES de insertar: solo confirmados y no-caidos reciben botin.
+    // El $jsonSchema de MongoDB actua como segunda barrera de seguridad.
     public void distribuirBotin(Integer idRaid) {
         Raid raid = mongoTemplate.findById(idRaid, Raid.class);
         if (raid == null) {
@@ -172,44 +176,65 @@ public class ItemRepository {
             throw new RuntimeException("No hay items cargados en el catalogo para distribuir.");
         }
 
-        Random rand = new Random();
+        // Ejecutar dentro de una transaccion con sesion explicita
+        org.springframework.transaction.support.TransactionTemplate txTemplate =
+                new org.springframework.transaction.support.TransactionTemplate(transactionManager);
 
-        for (Raid.InscripcionRaid ins : raid.getInscripciones()) {
-            // Solo distribuir a confirmados
-            boolean confirmado = ins.getConfirmado() != null && ins.getConfirmado();
-            
-            Personaje personaje = mongoTemplate.findById(ins.getIdPersonaje(), Personaje.class);
-            if (personaje == null) continue;
+        txTemplate.execute(status -> {
+            Random rand = new Random();
+            Set<String> itemsAsignados = new HashSet<>(); // Para evitar doble asignacion de mismo item en misma raid
 
-            Item randomItem = items.get(rand.nextInt(items.size()));
+            for (Raid.InscripcionRaid ins : raid.getInscripciones()) {
+                // Filtrar: solo confirmados
+                boolean confirmado = ins.getConfirmado() != null && ins.getConfirmado();
+                if (!confirmado) continue;
 
-            LootPool lp = new LootPool();
-            lp.setIdPool(sequenceGeneratorService.generateSequence("lootPoolId"));
-            lp.setIdPersonaje(personaje.getIdPersonaje());
-            lp.setIdItem(randomItem.getIdItem());
-            lp.setIdRaid(idRaid);
-            
-            // Establecer valores que validara el Schema Validation ($jsonSchema) de MongoDB
-            lp.setParticipoRaid(confirmado);
-            lp.setPersonajeCaido(personaje.getCaido() != null && personaje.getCaido());
-            lp.setCanjeado(false);
-            lp.setFecha(LocalDateTime.now());
+                Personaje personaje = mongoTemplate.findById(ins.getIdPersonaje(), Personaje.class);
+                if (personaje == null) continue;
 
-            // Este insert disparara la validacion del Schema Validation de MongoDB.
-            // Si el personaje no participo (confirmado=false) o esta caido (caido=true),
-            // la validacion fallara y lanzara una excepcion, abortando la transaccion.
-            mongoTemplate.insert(lp);
+                // Filtrar: no distribuir a caidos
+                if (personaje.getCaido() != null && personaje.getCaido()) continue;
 
-            // Crear notificacion de botin
-            Notificacion notif = new Notificacion();
-            notif.setIdNotificacion(sequenceGeneratorService.generateSequence("notificacionId"));
-            notif.setIdPersonaje(personaje.getIdPersonaje());
-            notif.setTipo("BOTIN");
-            notif.setMensaje("Recibiste un item para canjear de la raid: " + randomItem.getNombreItem());
-            notif.setLeida(false);
-            notif.setFecha(LocalDateTime.now());
-            mongoTemplate.save(notif);
-        }
+                // Elegir un item aleatorio que no haya sido asignado en esta raid
+                Item randomItem = null;
+                int intentos = 0;
+                while (intentos < items.size()) {
+                    Item candidato = items.get(rand.nextInt(items.size()));
+                    String key = idRaid + "-" + candidato.getIdItem();
+                    if (!itemsAsignados.contains(key)) {
+                        randomItem = candidato;
+                        itemsAsignados.add(key);
+                        break;
+                    }
+                    intentos++;
+                }
+                if (randomItem == null) continue; // No quedan items disponibles
+
+                LootPool lp = new LootPool();
+                lp.setIdPool(sequenceGeneratorService.generateSequence("lootPoolId"));
+                lp.setIdPersonaje(personaje.getIdPersonaje());
+                lp.setIdItem(randomItem.getIdItem());
+                lp.setIdRaid(idRaid);
+                lp.setParticipoRaid(true);      // Ya filtramos: siempre true
+                lp.setPersonajeCaido(false);     // Ya filtramos: siempre false
+                lp.setCanjeado(false);
+                lp.setFecha(LocalDateTime.now());
+
+                // Insert atomico — el $jsonSchema valida como segunda barrera
+                mongoTemplate.insert(lp);
+
+                // Crear notificacion de botin
+                Notificacion notif = new Notificacion();
+                notif.setIdNotificacion(sequenceGeneratorService.generateSequence("notificacionId"));
+                notif.setIdPersonaje(personaje.getIdPersonaje());
+                notif.setTipo("BOTIN");
+                notif.setMensaje("Recibiste un item para canjear de la raid: " + randomItem.getNombreItem());
+                notif.setLeida(false);
+                notif.setFecha(LocalDateTime.now());
+                mongoTemplate.save(notif);
+            }
+            return null;
+        });
     }
 
     public List<HistorialBotin> obtenerHistorialPorPersonaje(Integer idPersonaje) {
@@ -218,48 +243,115 @@ public class ItemRepository {
         return mongoTemplate.find(query, HistorialBotin.class);
     }
 
-    // Requerimiento 7: ranking materializado mediante Pipeline de Agregación
+    // Tarea 4: Ranking materializado mediante Aggregation Pipeline con $merge.
+    // Agrupa por personaje, calcula metricas de desempeno, y usa $merge para
+    // persistir atomicamente en la coleccion materializada clan_rankings.
+    // Tambien ejecuta un $bucket para agrupar personajes por rangos de iLvl.
     public void refrescarRanking() {
-        mongoTemplate.remove(new Query(), "clan_rankings");
+        // ============================================================
+        // Pipeline 1: Ranking por personaje (con $merge)
+        // ============================================================
+        // Usamos la API nativa de MongoDB para poder incluir $merge
+        com.mongodb.client.MongoDatabase database = mongoTemplate.getDb();
+        List<org.bson.Document> pipeline = new ArrayList<>();
 
-        // Pipeline de Agregación: $lookup, $unwind, $group, $sort
-        org.springframework.data.mongodb.core.aggregation.Aggregation aggregation = org.springframework.data.mongodb.core.aggregation.Aggregation.newAggregation(
-                // 1. Filtrar solo raids completadas
-                org.springframework.data.mongodb.core.aggregation.Aggregation.match(Criteria.where("estado").is("COMPLETADA")),
-                
-                // 2. Unwind inscripciones para contar asistencias individuales
-                org.springframework.data.mongodb.core.aggregation.Aggregation.unwind("inscripciones"),
-                
-                // 3. Filtrar solo los que asistieron (confirmado = true)
-                org.springframework.data.mongodb.core.aggregation.Aggregation.match(Criteria.where("inscripciones.confirmado").is(true)),
-                
-                // 4. Lookup a la coleccion clanes para obtener el nombre del clan
-                org.springframework.data.mongodb.core.aggregation.Aggregation.lookup("clanes", "idClan", "idClan", "clan_info"),
-                
-                // 5. Unwind clan_info
-                org.springframework.data.mongodb.core.aggregation.Aggregation.unwind("clan_info"),
-                
-                // 6. Group por clan y calcular metricas (ej. asistencias totales y conteo de raids)
-                org.springframework.data.mongodb.core.aggregation.Aggregation.group("idClan")
-                        .first("clan_info.nombreClan").as("nombreClan")
-                        .count().as("asistenciasTotales"),
-                
-                // 7. Sort descendente por asistencias
-                org.springframework.data.mongodb.core.aggregation.Aggregation.sort(Sort.Direction.DESC, "asistenciasTotales")
-        );
+        // 1. Match: solo raids completadas
+        pipeline.add(new org.bson.Document("$match",
+                new org.bson.Document("estado", "COMPLETADA")));
 
-        org.springframework.data.mongodb.core.aggregation.AggregationResults<Map> results = mongoTemplate.aggregate(aggregation, "raids", Map.class);
-        List<Map> rankingResult = results.getMappedResults();
+        // 2. Unwind inscripciones
+        pipeline.add(new org.bson.Document("$unwind", "$inscripciones"));
 
-        // Guardar resultados en la coleccion materializada
-        for (Map map : rankingResult) {
-            mongoTemplate.insert(map, "clan_rankings");
-        }
+        // 3. Match: solo confirmados
+        pipeline.add(new org.bson.Document("$match",
+                new org.bson.Document("inscripciones.confirmado", true)));
+
+        // 4. Lookup a personajes para obtener datos del personaje
+        pipeline.add(new org.bson.Document("$lookup",
+                new org.bson.Document("from", "personajes")
+                        .append("localField", "inscripciones.idPersonaje")
+                        .append("foreignField", "idPersonaje")
+                        .append("as", "personaje_info")));
+
+        // 5. Unwind personaje_info
+        pipeline.add(new org.bson.Document("$unwind", "$personaje_info"));
+
+        // 6. Lookup a clanes para obtener nombre del clan
+        pipeline.add(new org.bson.Document("$lookup",
+                new org.bson.Document("from", "clanes")
+                        .append("localField", "idClan")
+                        .append("foreignField", "idClan")
+                        .append("as", "clan_info")));
+
+        // 7. Unwind clan_info
+        pipeline.add(new org.bson.Document("$unwind",
+                new org.bson.Document("path", "$clan_info")
+                        .append("preserveNullAndEmptyArrays", true)));
+
+        // 8. Group por personaje
+        pipeline.add(new org.bson.Document("$group",
+                new org.bson.Document("_id", "$inscripciones.idPersonaje")
+                        .append("nombre_personaje", new org.bson.Document("$first", "$personaje_info.nombrePersonaje"))
+                        .append("nombre_clan", new org.bson.Document("$first", "$clan_info.nombreClan"))
+                        .append("faccion", new org.bson.Document("$first", "$personaje_info.faccion"))
+                        .append("raids_asistidas", new org.bson.Document("$sum", 1))
+                        .append("contribucion_dkp", new org.bson.Document("$first", "$personaje_info.puntosDkpActuales"))
+                        .append("item_level", new org.bson.Document("$first", "$personaje_info.itemLevel"))));
+
+        // 9. Add fields: renombrar _id a id_personaje
+        pipeline.add(new org.bson.Document("$addFields",
+                new org.bson.Document("id_personaje", "$_id")));
+
+        // 10. Sort descendente por raids asistidas y DKP
+        pipeline.add(new org.bson.Document("$sort",
+                new org.bson.Document("raids_asistidas", -1)
+                        .append("contribucion_dkp", -1)));
+
+        // 11. $merge: persistir atomicamente en clan_rankings (reemplaza si existe)
+        pipeline.add(new org.bson.Document("$merge",
+                new org.bson.Document("into", "clan_rankings")
+                        .append("on", "_id")
+                        .append("whenMatched", "replace")
+                        .append("whenNotMatched", "insert")));
+
+        // Ejecutar el pipeline (la salida va directo a clan_rankings via $merge)
+        database.getCollection("raids").aggregate(pipeline).toCollection();
+
+        // ============================================================
+        // Pipeline 2: $bucket — agrupacion por rangos de Item Level
+        // ============================================================
+        // Genera un resumen de cuantos personajes hay en cada rango de iLvl.
+        // Se guarda como un documento especial en clan_rankings con _id = "bucket_ilvl".
+        List<org.bson.Document> bucketPipeline = new ArrayList<>();
+
+        bucketPipeline.add(new org.bson.Document("$bucket",
+                new org.bson.Document("groupBy", "$itemLevel")
+                        .append("boundaries", java.util.Arrays.asList(0, 50, 100, 150, 200, 300))
+                        .append("default", "300+")
+                        .append("output", new org.bson.Document("count", new org.bson.Document("$sum", 1))
+                                .append("personajes", new org.bson.Document("$push", "$nombrePersonaje")))));
+
+        List<org.bson.Document> bucketResults = new ArrayList<>();
+        database.getCollection("personajes").aggregate(bucketPipeline)
+                .forEach(doc -> bucketResults.add(doc));
+
+        // Guardar resultados de bucket como documento en clan_rankings
+        org.bson.Document bucketDoc = new org.bson.Document("_id", "bucket_ilvl")
+                .append("tipo", "bucket")
+                .append("descripcion", "Distribucion de personajes por rango de Item Level")
+                .append("rangos", bucketResults);
+
+        database.getCollection("clan_rankings").replaceOne(
+                new org.bson.Document("_id", "bucket_ilvl"),
+                bucketDoc,
+                new com.mongodb.client.model.ReplaceOptions().upsert(true));
     }
 
     public List<Map<String, Object>> obtenerRanking() {
-        // Consultar la colección materializada
-        List<Map> list = mongoTemplate.findAll(Map.class, "clan_rankings");
+        // Consultar la coleccion materializada (excluir documentos de tipo bucket)
+        Query query = new Query(Criteria.where("tipo").ne("bucket"))
+                .with(Sort.by(Sort.Direction.DESC, "raids_asistidas"));
+        List<Map> list = mongoTemplate.find(query, Map.class, "clan_rankings");
         List<Map<String, Object>> res = new ArrayList<>();
         for (Map m : list) {
             Map<String, Object> map = new HashMap<>();
@@ -267,13 +359,12 @@ public class ItemRepository {
             map.put("nombre_personaje", m.get("nombre_personaje"));
             map.put("nombre_clan", m.get("nombre_clan"));
             map.put("faccion", m.get("faccion"));
-            map.put("raids_invitado", m.get("raids_invitado"));
             map.put("raids_asistidas", m.get("raids_asistidas"));
-            map.put("ausencias", m.get("ausencias"));
-            map.put("asistencia_perfecta", m.get("asistencia_perfecta"));
             map.put("contribucion_dkp", m.get("contribucion_dkp"));
+            map.put("item_level", m.get("item_level"));
             res.add(map);
         }
         return res;
     }
 }
+
